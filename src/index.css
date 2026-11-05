@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #1E1830;
+  background-image: 
+    radial-gradient(circle at 50% 10%, rgba(47, 74, 138, 0.28) 0%, transparent 55%),
+    radial-gradient(circle at 85% 60%, rgba(212, 165, 55, 0.12) 0%, transparent 45%),
+    linear-gradient(180deg, #161124 0%, #1E1830 45%, #141022 100%);
+  color: #F5E9C9;
+  font-family: 'Crimson Text', Georgia, serif;
+  overflow-x: hidden;
+}
+
+/* =========================================================
+   SISTEMA DE PERGAMINOS MEDIEVALES (SCROLL KIT)
+   ========================================================= */
+.pergamino-wrapper {
+  position: relative;
+  margin-top: 28px;
+  margin-bottom: 28px;
+  filter: drop-shadow(0 16px 28px rgba(0, 0, 0, 0.65));
+}
+
+/* Rollo Superior e Inferior */
+.rollo-superior {
+  height: 34px;
+  background: linear-gradient(180deg, #FDF3D7 0%, #E7D29E 45%, #C4AA70 85%, #8F7643 100%);
+  border: 2.5px solid #2A1B0E;
+  border-radius: 18px;
+  position: relative;
+  z-index: 20;
+  margin-left: -10px;
+  margin-right: -10px;
+  box-shadow: inset 0 4px 6px rgba(255,255,255,0.6), 0 6px 10px rgba(0,0,0,0.45);
+}
+
+.rollo-inferior {
+  height: 30px;
+  background: linear-gradient(0deg, #FDF3D7 0%, #E7D29E 45%, #C4AA70 85%, #8F7643 100%);
+  border: 2.5px solid #2A1B0E;
+  border-radius: 16px;
+  position: relative;
+  z-index: 20;
+  margin-left: -10px;
+  margin-right: -10px;
+  box-shadow: inset 0 -4px 6px rgba(255,255,255,0.5), 0 -4px 10px rgba(0,0,0,0.4);
+}
+
+/* Remates de madera y oro de los rollos */
+.rollo-superior::before, .rollo-superior::after,
+.rollo-inferior::before, .rollo-inferior::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 14px;
+  background: linear-gradient(180deg, #D4A537, #8B6514);
+  border: 2px solid #2A1B0E;
+  border-radius: 6px;
+}
+.rollo-superior::before, .rollo-inferior::before { left: -12px; }
+.rollo-superior::after, .rollo-inferior::after { right: -12px; }
+
+/* Listón Rojo Central */
+.liston-rojo {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 58px;
+  background: linear-gradient(135deg, #EF4444 0%, #B91C1C 55%, #7F1D1D 100%);
+  border-left: 2.5px solid #2A0808;
+  border-right: 2.5px solid #2A0808;
+  border-top: 2.5px solid #2A0808;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+  z-index: 30;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.5);
+}
+
+/* Cuerpo de la Hoja de Pergamino */
+.pergamino-cuerpo {
+  background: radial-gradient(circle at center, #F9F0D6 0%, #ECDAA9 70%, #DEC58B 100%);
+  color: #3B2A1A;
+  border-left: 3px solid #2A1B0E;
+  border-right: 3px solid #2A1B0E;
+  padding: 38px 28px 30px 28px;
+  position: relative;
+  z-index: 10;
+  box-shadow: 
+    inset 0 14px 20px -10px rgba(89, 64, 32, 0.45),
+    inset 0 -14px 20px -10px rgba(89, 64, 32, 0.45),
+    inset 12px 0 18px -10px rgba(89, 64, 32, 0.25),
+    inset -12px 0 18px -10px rgba(89, 64, 32, 0.25);
+}
+
+.pergamino-ornamento {
+  border-top: 1.5px solid rgba(110, 82, 46, 0.35);
+  border-bottom: 1.5px solid rgba(110, 82, 46, 0.35);
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+/* Sello de Lacre Rojo */
+.wax-seal {
+  background: radial-gradient(circle at 30% 30%, #EF4444 0%, #B91C1C 55%, #690B0B 100%);
+  border: 2px solid #FCA5A5;
+  box-shadow: 0 4px 14px rgba(185, 28, 28, 0.65), inset 0 2px 5px rgba(255,255,255,0.35);
+}
+
+/* Animación del Ouroboros */
+@keyframes slowSpinGlow {
+  0% { transform: rotate(0deg); filter: drop-shadow(0 0 15px rgba(212, 165, 55, 0.45)); }
+  50% { transform: rotate(180deg); filter: drop-shadow(0 0 28px rgba(240, 207, 110, 0.85)); }
+  100% { transform: rotate(360deg); filter: drop-shadow(0 0 15px rgba(212, 165, 55, 0.45)); }
+}
+.ouroboros-spin {
+  animation: slowSpinGlow 45s linear infinite;
+}

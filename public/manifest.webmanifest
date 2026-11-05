@@ -1,0 +1,17 @@
+{
+  "name": "DUALITY - Videojuego Oficial, Tienda y Grimorio Wiki",
+  "short_name": "DUALITY",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1E1830",
+  "theme_color": "#D4A537",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
