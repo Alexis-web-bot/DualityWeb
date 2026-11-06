@@ -47,9 +47,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                 <h3 className="font-display text-xl font-bold text-parchmentText">
                   {mode === 'login' ? 'Acceso al Gremio' : 'Registro de Explorador'}
                 </h3>
-                <span className="text-xs font-fantasy font-bold text-guildBlue">
-                  Cuenta Sincronizada Web PWA & App Móvil
-                </span>
               </div>
             </div>
             <button onClick={onClose} className="p-1 rounded bg-[#3B2A1A]/15 hover:bg-[#3B2A1A]/30 text-parchmentText">
@@ -161,7 +158,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
               type="submit"
               className="wax-seal w-full py-3 mt-2 rounded-xl text-white font-fantasy font-extrabold text-xs tracking-wider transition hover:scale-[1.01]"
             >
-              {mode === 'login' ? 'Entrar al Gremio (Sincronizar JWT)' : 'Registrar Cuenta en Base de Datos'}
+              {mode === 'login' ? 'Entrar al Gremio' : 'Registrar Explorador'}
             </button>
           </form>
         </PergaminoBox>

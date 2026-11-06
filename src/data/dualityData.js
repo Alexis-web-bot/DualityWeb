@@ -3,64 +3,12 @@
  * En la Fase 2, estos arreglos serán reemplazados por llamadas fetch/axios a tu API REST.
  */
 
-// 1. Catálogo de Ediciones de la Tienda Oficial
-export const STORE_EDITIONS = [
-  {
-    id: 'ed-explorador',
-    rango: 'Rango Bronce',
-    tag: 'Digital PC',
-    titulo: 'Edición Explorador',
-    precio: 299,
-    destacado: false,
-    descripcion: 'La experiencia esencial para adentrarse en las tierras fracturadas y enfrentar a las Criaturas del Vacío.',
-    beneficios: [
-      'Juego base completo DUALITY (Steam / DRM-Free).',
-      'Las 5 Clases jugables desbloqueables.',
-      'Acceso a la App/Wiki Grimorio Offline.'
-    ],
-    botonTexto: 'Añadir al Carrito • $299 MXN'
-  },
-  {
-    id: 'ed-maestro',
-    rango: 'Rango Maestro',
-    tag: 'MÁS VENDIDA',
-    titulo: 'Edición Maestro del Gremio',
-    precio: 449,
-    destacado: true,
-    descripcion: 'La colección definitiva con la banda sonora oficial y reliquias cosméticas para los verdaderos guardianes del bucle.',
-    beneficios: [
-      'Juego Base Completo para PC y Móvil.',
-      'Soundtrack Oficial Completo (Discos Digitales FLAC/MP3).',
-      'Libro de Arte Digital y Cartografía de Alta Resolución.',
-      'Pack de Armaduras Doradas del Ouroboros.',
-      'Ítem inicial exclusivo: Reloj de Bolsillo Astral.'
-    ],
-    botonTexto: 'Comprar Edición Deluxe • $449 MXN'
-  },
-  {
-    id: 'ed-expansion',
-    rango: 'Complemento DLC',
-    tag: 'Expansión',
-    titulo: 'Crónicas del Vacío + Arte',
-    precio: 199,
-    destacado: false,
-    descripcion: 'Expande tu aventura con una nueva región abisal, jefes secretos del bucle y los bocetos originales del estudio.',
-    beneficios: [
-      'Nuevo Bioma Jugable: La Catedral Sumergida.',
-      '3 Jefes inéditos de las Criaturas del Vacío.',
-      'Compendio PDF de Pergaminos y Lore (80 págs).'
-    ],
-    botonTexto: 'Añadir Expansión • $199 MXN'
-  }
-];
-
-// 2. Pistas del Soundtrack y Frecuencias para el Sintetizador Web Audio API
+// 1. Pistas del Soundtrack y Frecuencias para el Sintetizador Web Audio API
 export const SOUNDTRACK_LIST = [
   {
     id: 0,
     titulo: 'Disco I: Ecos del Ouroboros (Tema Principal)',
     subtitulo: 'Melodía mística de arpa antigua y cuerdas del bucle • 03:42',
-    precio: 49,
     notes: [293.66, 349.23, 440.00, 587.33, 523.25, 440.00, 349.23, 329.63],
     tempo: 360,
     wave: 'triangle'
@@ -69,7 +17,6 @@ export const SOUNDTRACK_LIST = [
     id: 1,
     titulo: 'Disco II: Marcha del Gremio de Exploradores',
     subtitulo: 'Himno heroico de la Ciudadela y salón de misiones • 02:58',
-    precio: 49,
     notes: [196.00, 293.66, 392.00, 440.00, 493.88, 392.00, 329.63, 293.66],
     tempo: 300,
     wave: 'sawtooth'
@@ -78,7 +25,6 @@ export const SOUNDTRACK_LIST = [
     id: 2,
     titulo: 'Disco III: Susurros de las Criaturas del Vacío',
     subtitulo: 'Tensión abisal y disonancia de las tierras corruptas • 04:15',
-    precio: 49,
     notes: [146.83, 155.56, 220.00, 207.65, 146.83, 130.81, 164.81, 146.83],
     tempo: 480,
     wave: 'sine'
@@ -87,14 +33,13 @@ export const SOUNDTRACK_LIST = [
     id: 3,
     titulo: 'Disco IV: Duelo en el Bucle Temporal (Boss Theme)',
     subtitulo: 'Frenesí rítmico para los combates por turnos decisivos • 03:30',
-    precio: 49,
     notes: [329.63, 392.00, 493.88, 659.25, 587.33, 493.88, 392.00, 440.00],
     tempo: 210,
     wave: 'square'
   }
 ];
 
-// 3. Fases del Bucle Temporal (Mockup 11)
+// 2. Fases del Bucle Temporal (Mockup 11)
 export const LOOP_PHASES = [
   {
     shortTitle: 'I. Alba del Olvido',
@@ -126,7 +71,7 @@ export const LOOP_PHASES = [
   }
 ];
 
-// 4. Base de Conocimiento del Grimorio Wiki (Mockups 3, 4, 5, 6, 8 y 10)
+// 3. Base de Conocimiento del Grimorio Wiki (Mockups 3, 4, 5, 6, 8 y 10)
 export const WIKI_CATEGORIES = {
   personajes: {
     titulo: 'Sección: Personajes y Compañeros',
@@ -310,7 +255,7 @@ export const WIKI_CATEGORIES = {
   }
 };
 
-// 5. Regiones Interactivas del Mapa de Aethelgard (Mockup 7)
+// 4. Regiones Interactivas del Mapa de Aethelgard (Mockup 7)
 export const MAP_REGIONS = [
   {
     badge: 'BIOMA #1 • ZONA CENTRAL',
@@ -346,7 +291,7 @@ export const MAP_REGIONS = [
   }
 ];
 
-// 6. Roles genéricos del Estudio Desarrollador (sin datos personales precargados)
+// 5. Roles genéricos del Estudio Desarrollador (sin datos personales precargados)
 export const STUDIO_TEAM = [
   { rol: 'Arquitectura & PWA', titulo: 'Líder de Arquitectura Web y Móvil', desc: 'Desarrollo de la Aplicación Web Progresiva (PWA), programación de Service Worker, Manifiesto Web, API de autenticación y arquitectura general.' },
   { rol: 'Dirección de Arte & UI', titulo: 'Dirección de Arte e Interfaz', desc: 'Diseño del sistema de contenedores de pergaminos (Scroll Kit y rollos fijos), curaduría de paleta de colores Dark Fantasy e iconografía.' },

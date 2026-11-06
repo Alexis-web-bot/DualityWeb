@@ -18,8 +18,7 @@ body {
    ========================================================= */
 .pergamino-wrapper {
   position: relative;
-  margin-top: 28px;
-  margin-bottom: 28px;
+  margin: 28px 14px;
   filter: drop-shadow(0 16px 28px rgba(0, 0, 0, 0.65));
 }
 
@@ -110,12 +109,66 @@ body {
   box-shadow: 0 4px 14px rgba(185, 28, 28, 0.65), inset 0 2px 5px rgba(255,255,255,0.35);
 }
 
-/* Animación del Ouroboros */
-@keyframes slowSpinGlow {
-  0% { transform: rotate(0deg); filter: drop-shadow(0 0 15px rgba(212, 165, 55, 0.45)); }
-  50% { transform: rotate(180deg); filter: drop-shadow(0 0 28px rgba(240, 207, 110, 0.85)); }
-  100% { transform: rotate(360deg); filter: drop-shadow(0 0 15px rgba(212, 165, 55, 0.45)); }
+/* =========================================================
+   ANIMACIONES DEL OUROBOROS (NAVBAR Y HERO PRINCIPAL)
+   ========================================================= */
+
+/* 1. Giro y respiración áurea para el Dragón Principal */
+@keyframes ouroborosEternalCycle {
+  0% {
+    transform: rotate(0deg) scale(1);
+    filter: drop-shadow(0 0 14px rgba(212, 165, 55, 0.55))
+            drop-shadow(0 0 28px rgba(47, 74, 138, 0.35));
+  }
+  50% {
+    transform: rotate(180deg) scale(1.06);
+    filter: drop-shadow(0 0 25px rgba(240, 207, 110, 0.95))
+            drop-shadow(0 0 45px rgba(185, 28, 28, 0.55));
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    filter: drop-shadow(0 0 14px rgba(212, 165, 55, 0.55))
+            drop-shadow(0 0 28px rgba(47, 74, 138, 0.35));
+  }
 }
+
+/* 2. Giro en sentido contrario para los anillos rúnicos del tiempo */
+@keyframes counterRuneOrbit {
+  0% { transform: rotate(360deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* 3. Movimiento continuo y destello para el logo izquierdo del Navbar */
+@keyframes navLogoSpin {
+  0% {
+    transform: rotate(0deg);
+    filter: drop-shadow(0 0 4px rgba(240, 207, 110, 0.5));
+  }
+  50% {
+    transform: rotate(180deg);
+    filter: drop-shadow(0 0 10px rgba(240, 207, 110, 0.95));
+  }
+  100% {
+    transform: rotate(360deg);
+    filter: drop-shadow(0 0 4px rgba(240, 207, 110, 0.5));
+  }
+}
+
 .ouroboros-spin {
-  animation: slowSpinGlow 45s linear infinite;
+  animation: ouroborosEternalCycle 32s linear infinite;
+}
+
+.rune-orbit-reverse {
+  animation: counterRuneOrbit 45s linear infinite;
+}
+
+.nav-ouroboros-anim {
+  animation: navLogoSpin 18s linear infinite;
+  transition: transform 0.4s ease, filter 0.4s ease;
+}
+
+/* Aceleración y destello al pasar el cursor sobre el logo izquierdo */
+.group:hover .nav-ouroboros-anim {
+  animation-duration: 4s;
+  filter: drop-shadow(0 0 14px rgba(240, 207, 110, 1));
 }

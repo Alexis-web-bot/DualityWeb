@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  ShoppingBag, Download, Menu, Flame, Swords, BookOpen, Monitor,
-  Smartphone, CheckCircle2, Check, Sparkles, Crown, ShoppingCart,
+  Download, Menu, Swords, BookOpen, Monitor,
+  Smartphone, CheckCircle2, Sparkles,
   Music, Square, Disc, Play, Clock, Search, Users, Shield, Backpack,
   Skull, Award, Flag, Sword, Repeat, FlaskConical, Gamepad2,
-  Cpu, ShieldCheck, WifiOff, RefreshCw, FolderDown, X, UserCheck, LogOut
+  UserCheck, LogOut
 } from 'lucide-react';
 
 import PergaminoBox from './components/PergaminoBox';
 import AuthModal from './components/AuthModal';
 import {
-  STORE_EDITIONS,
   SOUNDTRACK_LIST,
   LOOP_PHASES,
   WIKI_CATEGORIES,
@@ -23,16 +22,12 @@ export default function App() {
   // 1. ESTADOS GLOBALES DE LA APLICACIÓN
   // ---------------------------------------------------------
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeNav, setActiveNav] = useState('inicio');
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('duality_user');
     return saved ? JSON.parse(saved) : null;
   });
   const [authModalOpen, setAuthModalOpen] = useState(false);
-
-  // Estados de la Tienda y Carrito
-  const [cart, setCart] = useState([]);
-  const [cartModalOpen, setCartModalOpen] = useState(false);
-  const [checkoutSuccess, setCheckoutSuccess] = useState(false);
 
   // Estados del Grimorio Wiki y Búsqueda
   const [activeWikiTab, setActiveWikiTab] = useState('personajes');
@@ -63,11 +58,8 @@ export default function App() {
     ]
   });
 
-  // Estados de PWA (Lista de Cotejo 60%) y Notificaciones Toast
-  const [isOfflineSimulated, setIsOfflineSimulated] = useState(false);
-  const [pwaAuditOpen, setPwaAuditOpen] = useState(false);
+  // Notificaciones Toast y PWA Install
   const [pwaInstallOpen, setPwaInstallOpen] = useState(false);
-  const [cacheLog, setCacheLog] = useState("[SW Log]: Cache Storage 'duality-pwa-cache-v2' inicializada con los recursos principales.");
   const [toastMessage, setToastMessage] = useState(null);
 
   const showToast = (msg) => {
@@ -193,7 +185,6 @@ export default function App() {
       newLogs.unshift({ text: '🧪 Bebes un Elixir de Dualidad y restauras +45 HP.', highlight: false });
     }
 
-    // Verificar victoria
     if (enemyHp <= 0) {
       newLogs.unshift({ text: '🏆 ¡VICTORIA! El Devorador Abisal se disipa. Has obtenido +120 EXP y 1 Reliquia del Gremio.', highlight: true });
       setCombat({ ...combat, heroHp, heroMp, enemyHp, realm, finished: true, logs: newLogs });
@@ -201,7 +192,6 @@ export default function App() {
       return;
     }
 
-    // Contraataque del enemigo
     const enemyDmg = realm === 'void' ? 14 : 22;
     heroHp = Math.max(0, heroHp - enemyDmg);
     newLogs.unshift({ text: `💀 El Devorador Abisal lanza Garra del Olvido (-${enemyDmg} HP).`, highlight: false });
@@ -216,29 +206,7 @@ export default function App() {
   };
 
   // ---------------------------------------------------------
-  // 4. LÓGICA DEL CARRITO DE COMPRAS
-  // ---------------------------------------------------------
-  const addToCart = (name, price) => {
-    setCart([...cart, { name, price }]);
-    showToast(`Añadido a la Tesorería: ${name}`);
-  };
-
-  const removeCartItem = (idx) => {
-    setCart(cart.filter((_, i) => i !== idx));
-  };
-
-  const processGuildCheckout = () => {
-    if (cart.length === 0) {
-      showToast('Agrega al menos un producto antes de confirmar.');
-      return;
-    }
-    setCheckoutSuccess(true);
-    setCart([]);
-    showToast('¡Compra completada con éxito! Gracias por apoyar a DUALITY.');
-  };
-
-  // ---------------------------------------------------------
-  // 5. FILTRADO DEL GRIMORIO WIKI
+  // 4. FILTRADO DEL GRIMORIO WIKI
   // ---------------------------------------------------------
   const getFilteredWikiItems = () => {
     const q = wikiSearch.toLowerCase().trim();
@@ -273,79 +241,68 @@ export default function App() {
   const wikiView = getFilteredWikiItems();
   const currentLoop = LOOP_PHASES[selectedLoopIdx];
   const currentRegion = MAP_REGIONS[selectedRegionIdx];
-  const cartTotal = cart.reduce((acc, item) => acc + item.price, 0);
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-goldPrimary selection:text-dualityDeep">
-      
-      {/* BANNER DE MODO SIN CONEXIÓN (Puntos 3.9 y 3.10 Lista de Cotejo) */}
-      {isOfflineSimulated && (
-        <div className="bg-gradient-to-r from-amber-900 via-red-900 to-amber-900 text-goldLight px-4 py-2.5 text-center text-sm font-fantasy border-b-2 border-goldPrimary relative z-50 shadow-lg">
-          <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-center gap-3">
-            <WifiOff className="w-5 h-5 text-goldLight animate-bounce" />
-            <span>
-              <strong>MODO SIN CONEXIÓN ACTIVO:</strong> No se detecta red externa. Sirviendo el Grimorio y la Tienda de <strong>DUALITY</strong> desde la Caché Local del Service Worker (<code>duality-pwa-cache-v2</code>).
-            </span>
-            <button
-              onClick={() => setIsOfflineSimulated(false)}
-              className="px-3 py-0.5 rounded bg-goldPrimary text-dualityDeep font-bold text-xs hover:bg-goldLight transition"
-            >
-              Reconectar Red
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* =========================================================
-          1. BARRA DE NAVEGACIÓN PRINCIPAL (CON LOGIN Y CARRITO)
+          1. BARRA DE NAVEGACIÓN PRINCIPAL
           ========================================================= */}
       <header className="sticky top-0 z-40 bg-[#151024]/95 backdrop-blur-md border-b-2 border-goldPrimary/50 shadow-2xl">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          {/* Logo Ouroboros */}
-          <a href="#inicio" className="flex items-center gap-3 group">
-            <div className="w-11 h-11 rounded-full bg-guildBlue/80 border-2 border-goldPrimary flex items-center justify-center shadow-lg group-hover:scale-105 transition">
-              <svg className="w-7 h-7 text-goldLight" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="4">
-                <path d="M32 8a24 24 0 1 0 21.8 14" strokeLinecap="round" />
-                <polygon points="54,10 58,24 44,20" fill="currentColor" />
-                <circle cx="51" cy="17" r="1.5" fill="#1E1830" />
-              </svg>
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
+
+          {/* Logo Ouroboros Izquierdo con Movimiento y Aura */}
+          <a
+            href="#inicio"
+            onClick={() => setActiveNav('inicio')}
+            className="flex items-center gap-3 shrink-0 group"
+          >
+            <div className="relative w-11 h-11 shrink-0 rounded-full bg-gradient-to-b from-guildBlue/90 to-dualityDeep border-2 border-goldPrimary flex items-center justify-center shadow-[0_0_15px_rgba(212,165,55,0.4)] group-hover:scale-110 group-hover:border-goldLight transition-all duration-300">
+              <div className="absolute inset-0.5 rounded-full border border-dashed border-goldLight/60 rune-orbit-reverse"></div>
+              <img
+                src="/ouroboros-dorado.png"
+                alt="Logo Duality Ouroboros"
+                className="w-8 h-8 object-contain nav-ouroboros-anim relative z-10"
+              />
             </div>
             <div>
-              <span className="font-display font-black text-xl sm:text-2xl text-goldLight tracking-widest block leading-none">
+              <span className="font-display font-black text-xl text-goldLight tracking-widest block leading-none group-hover:text-white transition-colors">
                 DUALITY
               </span>
-              <span className="text-[11px] font-fantasy text-slate-300 tracking-wider">
-                RPG & PLATAFORMAS DE FANTASÍA OSCURA
+              <span className="text-[10px] font-fantasy text-slate-300 tracking-wider">
+                RPG & PLATAFORMAS
               </span>
             </div>
           </a>
 
-          {/* Enlaces Desktop */}
-          <nav className="hidden xl:flex items-center gap-1 text-xs font-fantasy font-bold tracking-wider">
-            <a href="#tienda" className="px-3 py-2 rounded-lg text-goldLight hover:bg-guildBlue/60 transition">Tienda</a>
-            <a href="#soundtrack" className="px-3 py-2 rounded-lg text-slate-200 hover:text-goldLight hover:bg-guildBlue/60 transition">Soundtrack</a>
-            <a href="#historia" className="px-3 py-2 rounded-lg text-slate-200 hover:text-goldLight hover:bg-guildBlue/60 transition">Historia y Bucle</a>
-            <a href="#grimorio" className="px-3 py-2 rounded-lg text-slate-200 hover:text-goldLight hover:bg-guildBlue/60 transition">Grimorio Wiki</a>
-            <a href="#combate" className="px-3 py-2 rounded-lg text-slate-200 hover:text-goldLight hover:bg-guildBlue/60 transition">Jugabilidad</a>
-            <a href="#mapa" className="px-3 py-2 rounded-lg text-slate-200 hover:text-goldLight hover:bg-guildBlue/60 transition">Mapa y Galería</a>
-            <a href="#requisitos" className="px-3 py-2 rounded-lg text-slate-200 hover:text-goldLight hover:bg-guildBlue/60 transition">Requisitos</a>
-            <a href="#equipo" className="px-3 py-2 rounded-lg text-slate-200 hover:text-goldLight hover:bg-guildBlue/60 transition">Estudio</a>
+          {/* Enlaces Desktop (Visibles en pantallas medianas y grandes) */}
+          <nav className="hidden lg:flex items-center gap-0.5 text-[11px] font-fantasy font-bold tracking-wider">
+            {[
+              { id: 'soundtrack', label: 'Soundtrack' },
+              { id: 'historia', label: 'Historia' },
+              { id: 'grimorio', label: 'Grimorio' },
+              { id: 'combate', label: 'Combate' },
+              { id: 'mapa', label: 'Mapa' },
+              { id: 'requisitos', label: 'Requisitos' },
+              { id: 'equipo', label: 'Estudio' }
+            ].map((item) => (
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                onClick={() => setActiveNav(item.id)}
+                className={`px-2.5 py-1.5 rounded-lg transition ${
+                  activeNav === item.id
+                    ? 'bg-guildBlue text-goldLight border border-goldPrimary/50 shadow'
+                    : 'text-slate-200 hover:text-goldLight hover:bg-guildBlue/60'
+                }`}
+              >
+                {item.label}
+              </a>
+            ))}
           </nav>
 
-          {/* Botones de Acción: Carrito, Login e Instalar PWA */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => { setCheckoutSuccess(false); setCartModalOpen(true); }}
-              className="relative flex items-center gap-1.5 px-3 py-2 rounded-xl bg-guildBlue hover:bg-guildBlueLight text-goldLight border border-goldPrimary/60 font-fantasy font-bold text-xs transition shadow-md"
-            >
-              <ShoppingBag className="w-4 h-4" />
-              <span className="hidden sm:inline">Tesorería</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-ribbonRed text-white text-[11px] font-bold">
-                {cart.length}
-              </span>
-            </button>
-
-            {/* Botón de Sesión (Login o Perfil Activo) */}
+          {/* Botones de Acción: Login e Instalar PWA */}
+          <div className="flex items-center gap-2 shrink-0">
             {user ? (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/90 border border-goldPrimary text-goldLight font-fantasy text-xs">
                 <UserCheck className="w-4 h-4 text-emerald-400" />
@@ -381,39 +338,38 @@ export default function App() {
 
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="xl:hidden p-2 rounded-lg bg-dualityDeep border border-goldPrimary/50 text-goldLight"
+              className="lg:hidden p-2 rounded-lg bg-dualityDeep border border-goldPrimary/50 text-goldLight"
             >
               <Menu className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Menú Móvil */}
+        {/* Menú Móvil Desplegable */}
         {mobileMenuOpen && (
-          <div className="xl:hidden bg-[#120E1E] border-t border-goldPrimary/40 px-4 py-4 font-fantasy text-xs">
+          <div className="lg:hidden bg-[#120E1E] border-t border-goldPrimary/40 px-4 py-4 font-fantasy text-xs">
             <div className="grid grid-cols-2 gap-2">
-              <a href="#tienda" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🛒 Tienda Oficial</a>
-              <a href="#soundtrack" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🎵 Soundtrack</a>
-              <a href="#historia" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">📜 Historia y Bucle</a>
-              <a href="#grimorio" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">📖 Grimorio Wiki</a>
-              <a href="#combate" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">⚔️ Simulador Combate</a>
-              <a href="#mapa" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🗺️ Mapa del Mundo</a>
-              <a href="#requisitos" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">💻 Requisitos PC/Móvil</a>
-              <a href="#equipo" onClick={() => setMobileMenuOpen(false)} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🛡️ Estudio</a>
+              <a href="#soundtrack" onClick={() => { setActiveNav('soundtrack'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🎵 Soundtrack</a>
+              <a href="#historia" onClick={() => { setActiveNav('historia'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">📜 Historia y Bucle</a>
+              <a href="#grimorio" onClick={() => { setActiveNav('grimorio'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">📖 Grimorio Wiki</a>
+              <a href="#combate" onClick={() => { setActiveNav('combate'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-guildBlue/30 text-goldLight border border-goldPrimary/30">⚔️ Simulador Combate</a>
+              <a href="#mapa" onClick={() => { setActiveNav('mapa'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🗺️ Mapa del Mundo</a>
+              <a href="#requisitos" onClick={() => { setActiveNav('requisitos'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">💻 Requisitos PC/Móvil</a>
+              <a href="#equipo" onClick={() => { setActiveNav('equipo'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🛡️ Estudio</a>
             </div>
           </div>
         )}
       </header>
 
       {/* =========================================================
-          2. HERO COMERCIAL CON EL DRAGÓN OUROBOROS GIRATORIO
+          2. HERO PRINCIPAL CON EL DRAGÓN OUROBOROS OFICIAL
           ========================================================= */}
       <section id="inicio" className="relative z-10 py-14 sm:py-20 px-4 border-b-2 border-goldPrimary/40 overflow-hidden">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
           <div className="lg:col-span-7 space-y-6 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-guildBlue/70 border border-goldPrimary text-goldLight text-xs font-fantasy tracking-widest shadow">
               <span className="w-2 h-2 rounded-full bg-goldLight animate-ping"></span>
-              LANZAMIENTO OFICIAL 2026 • PLATAFORMAS 2D & RPG POR TURNOS
+              PORTAL OFICIAL DE LORE Y EXHIBICIÓN
             </div>
 
             <h1 className="font-display text-5xl sm:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-goldLight via-goldPrimary to-[#9E7419] tracking-widest drop-shadow-[0_5px_15px_rgba(0,0,0,0.9)]">
@@ -429,15 +385,11 @@ export default function App() {
             </p>
 
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2">
-              <a href="#tienda" className="wax-seal px-7 py-4 rounded-xl text-white font-fantasy font-extrabold text-sm tracking-wider flex items-center gap-2.5 hover:scale-105 transition">
-                <Flame className="w-5 h-5 text-goldLight" />
-                <span>COMPRAR DUALITY • $299 MXN</span>
-              </a>
-              <a href="#combate" className="px-6 py-4 rounded-xl bg-guildBlue hover:bg-guildBlueLight text-goldLight font-fantasy font-bold text-sm border-2 border-goldPrimary/70 flex items-center gap-2 transition shadow-lg">
+              <a href="#combate" onClick={() => setActiveNav('combate')} className="px-6 py-4 rounded-xl bg-guildBlue hover:bg-guildBlueLight text-goldLight font-fantasy font-bold text-sm border-2 border-goldPrimary/70 flex items-center gap-2 transition shadow-lg">
                 <Swords className="w-5 h-5" />
                 <span>Jugar Demo de Combate</span>
               </a>
-              <a href="#grimorio" className="px-5 py-4 rounded-xl bg-dualityDeep/90 hover:bg-dualityDeep text-parchmentLight font-fantasy font-semibold text-sm border border-goldPrimary/40 flex items-center gap-2 transition">
+              <a href="#grimorio" onClick={() => setActiveNav('grimorio')} className="px-5 py-4 rounded-xl bg-dualityDeep/90 hover:bg-dualityDeep text-parchmentLight font-fantasy font-semibold text-sm border border-goldPrimary/40 flex items-center gap-2 transition">
                 <BookOpen className="w-4 h-4 text-goldPrimary" />
                 <span>Abrir Grimorio Wiki</span>
               </a>
@@ -445,40 +397,50 @@ export default function App() {
 
             <div className="pt-4 flex flex-wrap items-center justify-center lg:justify-start gap-3 text-xs text-slate-300 font-fantasy">
               <span className="px-3 py-1.5 rounded-lg bg-[#120E1E]/90 border border-goldPrimary/30 flex items-center gap-1.5">
-                <Monitor className="w-4 h-4 text-goldPrimary" /> Windows PC (Steam / Itch.io)
+                <Monitor className="w-4 h-4 text-goldPrimary" /> Desarrollado para PC
               </span>
               <span className="px-3 py-1.5 rounded-lg bg-[#120E1E]/90 border border-goldPrimary/30 flex items-center gap-1.5">
                 <Smartphone className="w-4 h-4 text-goldPrimary" /> Android Companion App
               </span>
               <span className="px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4" /> PWA Instalable & Offline Ready
+                <CheckCircle2 className="w-4 h-4" /> App Instalable & Modo Offline
               </span>
             </div>
           </div>
 
-          {/* Emblema del Ouroboros */}
+          {/* Emblema Principal del Ouroboros con Portal Astral Animado */}
           <div className="lg:col-span-5 flex flex-col items-center">
-            <div className="relative w-72 h-72 sm:w-80 sm:h-80 flex items-center justify-center">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-guildBlue/40 via-goldPrimary/25 to-ribbonRed/30 blur-2xl animate-pulse"></div>
-              <svg className="w-full h-full ouroboros-spin relative z-10" viewBox="0 0 240 240" fill="none">
-                <circle cx="120" cy="120" r="106" stroke="#D4A537" strokeWidth="2" strokeDasharray="6 6" opacity="0.7" />
-                <circle cx="120" cy="120" r="94" stroke="#2F4A8A" strokeWidth="4" opacity="0.8" />
-                <path d="M120 32 C68 32, 32 72, 32 120 C32 168, 72 208, 120 208 C168 208, 208 168, 208 120 C208 82, 182 48, 145 36" stroke="url(#goldGrad)" strokeWidth="18" strokeLinecap="round" />
-                <path d="M120 32 C68 32, 32 72, 32 120 C32 168, 72 208, 120 208 C168 208, 208 168, 208 120 C208 82, 182 48, 145 36" stroke="#3B2A1A" strokeWidth="14" strokeDasharray="3 7" strokeLinecap="round" />
-                <path d="M115 20 L148 26 L138 48 L112 42 Z" fill="#F0CF6E" stroke="#3B2A1A" strokeWidth="3" />
-                <circle cx="132" cy="31" r="3.5" fill="#B91C1C" />
-                <polygon points="120,64 134,106 176,120 134,134 120,176 106,134 64,120 106,106" fill="url(#goldGrad)" opacity="0.85" />
-                <circle cx="120" cy="120" r="14" fill="#1E1830" stroke="#F0CF6E" strokeWidth="3" />
-                <defs>
-                  <linearGradient id="goldGrad" x1="0" y1="0" x2="240" y2="240" gradientUnits="userSpaceOnUse">
-                    <stop offset="0%" stopColor="#F0CF6E" />
-                    <stop offset="50%" stopColor="#D4A537" />
-                    <stop offset="100%" stopColor="#8A6214" />
-                  </linearGradient>
-                </defs>
+            <div className="relative w-72 h-72 sm:w-80 sm:h-80 flex items-center justify-center group">
+
+              {/* 1. Aura Mística Pulsante de Fondo */}
+              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-guildBlue/50 via-goldPrimary/30 to-ribbonRed/40 blur-2xl animate-pulse"></div>
+
+              {/* 2. Anillos Rúnicos del Reloj (Giran en sentido opuesto al dragón) */}
+              <svg className="absolute inset-0 w-full h-full rune-orbit-reverse pointer-events-none" viewBox="0 0 240 240" fill="none">
+                <circle cx="120" cy="120" r="114" stroke="#D4A537" strokeWidth="1.5" strokeDasharray="4 8" opacity="0.6" />
+                <circle cx="120" cy="120" r="104" stroke="#2F4A8A" strokeWidth="3" opacity="0.85" />
+                <circle cx="120" cy="120" r="95" stroke="#F0CF6E" strokeWidth="1" strokeDasharray="12 6" opacity="0.5" />
+                <polygon points="120,2 124,14 116,14" fill="#F0CF6E" />
+                <polygon points="120,238 124,226 116,226" fill="#F0CF6E" />
+                <polygon points="2,120 14,124 14,116" fill="#F0CF6E" />
+                <polygon points="238,120 226,124 226,116" fill="#F0CF6E" />
               </svg>
-              <div className="absolute -bottom-3 bg-[#120E1E] border-2 border-goldPrimary px-5 py-2 rounded-full shadow-2xl text-center z-20">
-                <span className="font-fantasy text-xs font-bold text-goldLight tracking-widest">EL CICLO COMIENZA</span>
+
+              {/* 3. Núcleo Oscuro para resaltar el dorado */}
+              <div className="absolute w-52 h-52 sm:w-60 sm:h-60 rounded-full bg-[#120E1E]/90 border border-goldPrimary/30 shadow-inner"></div>
+
+              {/* 4. Dragón Ouroboros Oficial Animado */}
+              <img
+                src="/ouroboros-dorado.png"
+                alt="Emblema Ouroboros Duality"
+                className="w-56 h-56 sm:w-64 sm:h-64 object-contain ouroboros-spin relative z-10 group-hover:scale-105 transition-transform duration-500"
+              />
+
+              {/* 5. Insignia Inferior Flotante */}
+              <div className="absolute -bottom-3 bg-[#120E1E] border-2 border-goldPrimary px-5 py-2 rounded-full shadow-[0_0_20px_rgba(212,165,55,0.5)] text-center z-20">
+                <span className="font-fantasy text-xs font-bold text-goldLight tracking-widest">
+                  EL CICLO COMIENZA
+                </span>
               </div>
             </div>
           </div>
@@ -486,79 +448,15 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          3. TIENDA OFICIAL: LAS 3 EDICIONES EN PERGAMINOS
-          ========================================================= */}
-      <section id="tienda" className="relative z-10 py-16 px-4 max-w-7xl mx-auto">
-        <div className="text-center max-w-3xl mx-auto mb-12 space-y-3">
-          <span className="px-3 py-1 rounded bg-guildBlue/60 border border-goldPrimary/50 text-goldLight font-fantasy text-xs tracking-widest">
-            MERCADO DEL GREMIO DE EXPLORADORES
-          </span>
-          <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">Adquiere tu Edición de DUALITY</h2>
-          <p className="text-slate-300 text-base sm:text-lg">
-            Selecciona tu edición digital para PC y desbloquea acceso inmediato al juego completo, recompensas del Gremio y el Grimorio Oficial.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
-          {STORE_EDITIONS.map((ed) => (
-            <PergaminoBox
-              key={ed.id}
-              className={`flex flex-col justify-between ${ed.destacado ? 'lg:-translate-y-3' : ''}`}
-              bodyClassName={`flex-1 flex flex-col justify-between ${ed.destacado ? 'ring-4 ring-goldPrimary' : ''}`}
-            >
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b-2 border-[#8F7643]/40 pb-3 pt-2">
-                  <span className="font-fantasy font-bold text-xs uppercase tracking-widest text-guildBlue">{ed.rango}</span>
-                  <span className={`px-2.5 py-0.5 rounded font-fantasy font-bold text-xs ${ed.destacado ? 'bg-ribbonRed text-white' : 'bg-guildBlue text-goldLight'}`}>
-                    {ed.tag}
-                  </span>
-                </div>
-                <h3 className="font-display text-2xl font-black text-parchmentText">{ed.titulo}</h3>
-                <div className="text-3xl font-fantasy font-black text-ribbonRed">
-                  ${ed.precio} <span className="text-sm font-normal text-parchmentText">MXN</span>
-                </div>
-                <p className="text-sm leading-relaxed">{ed.descripcion}</p>
-                <ul className="space-y-2 text-sm pt-2 border-t border-[#8F7643]/30">
-                  {ed.beneficios.map((b, i) => (
-                    <li key={i} className="flex items-center gap-2">
-                      {ed.destacado && i === 0 ? (
-                        <Sparkles className="w-4 h-4 text-ribbonRed shrink-0" />
-                      ) : (
-                        <Check className="w-4 h-4 text-guildBlue shrink-0" />
-                      )}
-                      <span>{b}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="pt-6 mt-6 border-t border-[#8F7643]/40">
-                <button
-                  onClick={() => addToCart(ed.titulo, ed.precio)}
-                  className={`w-full py-3.5 rounded-xl font-fantasy font-extrabold text-xs tracking-wider transition flex items-center justify-center gap-2 ${
-                    ed.destacado
-                      ? 'wax-seal text-white'
-                      : 'bg-guildBlue hover:bg-guildBlueLight text-goldLight shadow-lg'
-                  }`}
-                >
-                  {ed.destacado ? <Crown className="w-4 h-4 text-goldLight" /> : <ShoppingCart className="w-4 h-4" />}
-                  <span>{ed.botonTexto}</span>
-                </button>
-              </div>
-            </PergaminoBox>
-          ))}
-        </div>
-      </section>
-
-      {/* =========================================================
-          4. SECCIÓN SOUNDTRACK Y SINTETIZADOR WEB AUDIO API
+          3. SECCIÓN SOUNDTRACK Y SINTETIZADOR WEB AUDIO API
           ========================================================= */}
       <section id="soundtrack" className="relative z-10 py-14 px-4 bg-[#141022]/90 border-y-2 border-goldPrimary/40">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-5 space-y-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded bg-amber-900/60 border border-goldPrimary text-goldLight font-fantasy text-xs">
-              <Music className="w-4 h-4" /> SECCIÓN SOUNDTRACK • MOCKUP OFICIAL
+              <Music className="w-4 h-4" /> SECCIÓN SOUNDTRACK
             </div>
-            <h2 className="font-display text-3xl sm:text-4xl font-bold text-goldLight">Soundtrack Oficial y Discos Digitales</h2>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold text-goldLight">Soundtrack Oficial y Pistas Digitales</h2>
             <p className="text-slate-300 text-base leading-relaxed">
               Escucha un adelanto en tiempo real de las composiciones atmosféricas que acompañan cada combate y región de <strong>DUALITY</strong>.
             </p>
@@ -587,16 +485,6 @@ export default function App() {
                 height="64"
                 className="w-full h-16 rounded-lg bg-[#120E1E] border border-goldPrimary/30"
               ></canvas>
-
-              <div className="flex items-center justify-between pt-2 border-t border-goldPrimary/20">
-                <span className="text-xs text-slate-300">Álbum Completo (4 Discos Digitales FLAC + MP3)</span>
-                <button
-                  onClick={() => addToCart('Álbum Completo Soundtrack Oficial DUALITY', 149)}
-                  className="px-4 py-2 rounded-lg bg-goldPrimary hover:bg-goldLight text-dualityDeep font-fantasy font-extrabold text-xs transition shadow"
-                >
-                  Comprar Álbum ($149 MXN)
-                </button>
-              </div>
             </div>
           </div>
 
@@ -604,7 +492,7 @@ export default function App() {
             <PergaminoBox bodyClassName="space-y-3">
               <div className="flex items-center justify-between border-b border-[#8F7643]/40 pb-2">
                 <h3 className="font-fantasy font-bold text-lg text-guildBlue flex items-center gap-2">
-                  <Disc className="w-5 h-5 text-ribbonRed" /> Catálogo de Discos Digitales
+                  <Disc className="w-5 h-5 text-ribbonRed" /> Catálogo de Pistas
                 </h3>
                 <span className="text-xs font-bold text-parchmentText">Audio Sintetizado en Vivo</span>
               </div>
@@ -626,12 +514,6 @@ export default function App() {
                       <p className="text-xs text-parchmentText/80">{track.subtitulo}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => addToCart(`Disco Digital: ${track.titulo}`, track.precio)}
-                    className="px-3 py-1.5 rounded-lg bg-ribbonRed hover:bg-ribbonDark text-white font-fantasy font-bold text-xs shrink-0 transition"
-                  >
-                    Comprar ${track.precio} MXN
-                  </button>
                 </div>
               ))}
             </PergaminoBox>
@@ -640,7 +522,7 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          5. HISTORIA, OBJETIVO, GÉNERO Y SIMULADOR DEL BUCLE TEMPORAL
+          4. HISTORIA, OBJETIVO, GÉNERO Y SIMULADOR DEL BUCLE TEMPORAL
           ========================================================= */}
       <section id="historia" className="relative z-10 py-16 px-4 max-w-6xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-10 space-y-2">
@@ -737,14 +619,14 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          6. EL GRIMORIO DE DUALITY (WIKI CON 6 CATEGORÍAS Y BUSCADOR)
+          5. EL GRIMORIO DE DUALITY (WIKI CON 6 CATEGORÍAS Y BUSCADOR)
           ========================================================= */}
       <section id="grimorio" className="relative z-10 py-16 px-4 bg-[#141022]/90 border-y-2 border-goldPrimary/40">
         <div className="max-w-7xl mx-auto space-y-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="space-y-2 text-center md:text-left">
               <span className="px-3 py-1 rounded bg-guildBlue/70 border border-goldPrimary/50 text-goldLight font-fantasy text-xs tracking-widest">
-                ENCICLOPEDIA OFICIAL • MOCKUPS 3, 4, 5, 6, 8 Y 10
+                ENCICLOPEDIA OFICIAL
               </span>
               <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">El Grimorio de DUALITY</h2>
               <p className="text-slate-300 text-base">
@@ -831,12 +713,12 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          7. JUGABILIDAD, CONTROLES Y SIMULADOR DE COMBATE POR TURNOS
+          6. JUGABILIDAD, CONTROLES Y SIMULADOR DE COMBATE POR TURNOS
           ========================================================= */}
       <section id="combate" className="relative z-10 py-16 px-4 max-w-7xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-12 space-y-2">
           <span className="px-3 py-1 rounded bg-guildBlue/60 border border-goldPrimary/50 text-goldLight font-fantasy text-xs tracking-widest">
-            GUÍA DE COMBATE E INSTRUCCIONES • PUNTO 2.5
+            GUÍA DE COMBATE E INSTRUCCIONES
           </span>
           <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">Mecánicas, Controles y Demo de Combate</h2>
         </div>
@@ -972,13 +854,13 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          8. MAPA INTERACTIVO DE AETHELGARD (MOCKUP 7)
+          7. MAPA INTERACTIVO DE AETHELGARD
           ========================================================= */}
       <section id="mapa" className="relative z-10 py-16 px-4 bg-[#141022]/90 border-y-2 border-goldPrimary/40">
         <div className="max-w-7xl mx-auto space-y-10">
           <div className="text-center max-w-3xl mx-auto space-y-2">
             <span className="px-3 py-1 rounded bg-guildBlue/60 border border-goldPrimary/50 text-goldLight font-fantasy text-xs tracking-widest">
-              CARTOGRAFÍA Y MULTIMEDIA • MOCKUP 7 Y PUNTO 2.7
+              CARTOGRAFÍA Y MULTIMEDIA
             </span>
             <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">Mapa de Aethelgard</h2>
           </div>
@@ -1047,16 +929,17 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          9. REQUISITOS DEL SISTEMA (PC Y MÓVIL PWA)
+          8. REQUISITOS DEL SISTEMA (PC Y MÓVIL PWA)
           ========================================================= */}
       <section id="requisitos" className="relative z-10 py-16 px-4 max-w-6xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-10 space-y-2">
           <h2 className="font-display text-3xl sm:text-4xl font-bold text-goldLight">Requisitos para Ejecutar DUALITY</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <PergaminoBox bodyClassName="space-y-3">
-            <h3 className="font-display text-xl font-bold text-guildBlue flex items-center gap-2 border-b border-[#8F7643] pb-2">
-              <Monitor className="w-5 h-5 text-ribbonRed" /> Requisitos en Computadora (PC)
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 lg:gap-12 items-stretch">
+          <PergaminoBox className="flex flex-col" bodyClassName="flex-1 space-y-3">
+            <h3 className="font-display text-xl font-bold text-guildBlue flex items-center gap-2.5 border-b border-[#8F7643] pb-2">
+              <Monitor className="w-5 h-5 text-ribbonRed shrink-0" />
+              <span>Requisitos en Computadora (PC)</span>
             </h3>
             <ul className="space-y-2 text-sm">
               <li><strong>Sistema Operativo:</strong> Windows 10 / Windows 11 (64-bits) o macOS 12+.</li>
@@ -1067,9 +950,10 @@ export default function App() {
             </ul>
           </PergaminoBox>
 
-          <PergaminoBox bodyClassName="space-y-3">
-            <h3 className="font-display text-xl font-bold text-guildBlue flex items-center gap-2 border-b border-[#8F7643] pb-2">
-              <Smartphone className="w-5 h-5 text-ribbonRed" /> Requisitos Móvil (Android & Wiki PWA)
+          <PergaminoBox className="flex flex-col" bodyClassName="flex-1 space-y-3">
+            <h3 className="font-display text-xl font-bold text-guildBlue flex items-center gap-2.5 border-b border-[#8F7643] pb-2">
+              <Smartphone className="w-5 h-5 text-ribbonRed shrink-0" />
+              <span>Requisitos Móvil (Android & Wiki PWA)</span>
             </h3>
             <ul className="space-y-2 text-sm">
               <li><strong>Sistema Operativo:</strong> Android 7.0 (API 24) o superior / iOS 15+.</li>
@@ -1083,7 +967,7 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          10. ESTUDIO DESARROLLADOR Y CRÉDITOS
+          9. ESTUDIO DESARROLLADOR Y CRÉDITOS
           ========================================================= */}
       <section id="equipo" className="relative z-10 py-16 px-4 bg-[#141022]/90 border-t-2 border-goldPrimary/40">
         <div className="max-w-6xl mx-auto space-y-8">
@@ -1105,18 +989,6 @@ export default function App() {
         </div>
       </section>
 
-      {/* BOTÓN FLOTANTE DE AUDITORÍA PWA */}
-      <div className="fixed bottom-4 left-4 z-50">
-        <button
-          onClick={() => setPwaAuditOpen(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#120E1E]/95 hover:bg-guildBlue text-goldLight border-2 border-goldPrimary shadow-2xl font-fantasy text-xs font-bold transition"
-        >
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
-          <Cpu className="w-4 h-4 text-goldPrimary" />
-          <span>Panel PWA & Offline (Lista de Cotejo)</span>
-        </button>
-      </div>
-
       {/* MODAL DE AUTENTICACIÓN (LOGIN / REGISTRO) */}
       <AuthModal
         isOpen={authModalOpen}
@@ -1126,101 +998,6 @@ export default function App() {
           showToast(`¡Bienvenido al Gremio, ${loggedUser.username}!`);
         }}
       />
-
-      {/* MODAL DEL CARRITO DE COMPRAS */}
-      {cartModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-lg w-full">
-            <PergaminoBox bodyClassName="space-y-4">
-              <div className="flex items-center justify-between border-b-2 border-[#8F7643] pb-2">
-                <h3 className="font-display text-xl font-bold text-parchmentText flex items-center gap-2">
-                  <ShoppingBag className="w-5 h-5 text-ribbonRed" /> Tesorería del Gremio
-                </h3>
-                <button onClick={() => setCartModalOpen(false)} className="p-1 rounded bg-[#3B2A1A]/15 text-parchmentText">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {cart.length === 0 ? (
-                  <p className="text-sm text-center py-6 italic text-parchmentText/80">
-                    Tu tesorería está vacía. Selecciona una Edición de DUALITY o un Disco Digital.
-                  </p>
-                ) : (
-                  cart.map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-2.5 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643]">
-                      <span className="text-sm font-bold text-parchmentText">{item.name}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="font-fantasy font-bold text-xs text-ribbonRed">${item.price} MXN</span>
-                        <button onClick={() => removeCartItem(idx)} className="text-xs font-bold text-parchmentText hover:text-ribbonRed">✕</button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="flex items-center justify-between pt-3 border-t-2 border-[#8F7643] font-fantasy font-bold text-lg">
-                <span>Total a Pagar:</span>
-                <span className="text-ribbonRed">${cartTotal} MXN</span>
-              </div>
-
-              {checkoutSuccess && (
-                <div className="p-3 rounded-xl bg-emerald-950 text-emerald-200 border border-emerald-500 text-xs">
-                  ¡Orden Confirmada! Tu licencia digital de DUALITY ha sido vinculada a tu cuenta.
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-2">
-                <button onClick={() => setCart([])} className="px-4 py-2.5 rounded-xl bg-[#3B2A1A]/20 text-parchmentText font-fantasy font-bold text-xs">
-                  Vaciar
-                </button>
-                <button onClick={processGuildCheckout} className="wax-seal flex-1 py-3 rounded-xl text-white font-fantasy font-extrabold text-xs">
-                  Completar Compra Ahora
-                </button>
-              </div>
-            </PergaminoBox>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE AUDITORÍA PWA */}
-      {pwaAuditOpen && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-2xl w-full rounded-2xl bg-[#18132B] border-2 border-goldPrimary p-5 space-y-4 text-xs text-slate-200">
-            <div className="flex items-center justify-between border-b border-goldPrimary/40 pb-3">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-6 h-6 text-emerald-400" />
-                <h3 className="font-fantasy font-bold text-base text-goldLight">Panel Técnico PWA — Lista de Cotejo (60%)</h3>
-              </div>
-              <button onClick={() => setPwaAuditOpen(false)} className="p-1 rounded bg-slate-800 text-slate-300">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button
-                onClick={() => setIsOfflineSimulated(!isOfflineSimulated)}
-                className="p-3 rounded-xl bg-amber-900/50 border border-goldPrimary text-goldLight font-fantasy font-bold flex items-center justify-center gap-2"
-              >
-                <WifiOff className="w-4 h-4" /> Simular Modo Offline (3.9 y 3.10)
-              </button>
-              <button
-                onClick={() => {
-                  setCacheLog("[SW Activate]: Caché antigua 'duality-pwa-cache-v1' eliminada. Versión activa: 'duality-pwa-cache-v2'.");
-                  showToast('Caché v1 reemplazada por v2');
-                }}
-                className="p-3 rounded-xl bg-guildBlue/50 border border-goldPrimary text-goldLight font-fantasy font-bold flex items-center justify-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" /> Rotar Caché v1 ➔ v2 (3.8)
-              </button>
-            </div>
-
-            <div className="p-3 rounded bg-black/60 font-mono text-[11px] text-emerald-300">
-              {cacheLog}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* MODAL DE INSTALACIÓN PWA */}
       {pwaInstallOpen && (
