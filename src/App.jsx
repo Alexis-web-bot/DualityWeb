@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Download, Menu, Swords, BookOpen, Monitor,
   Smartphone, CheckCircle2, Sparkles,
-  Music, Square, Disc, Play, Clock, Search, Users, Shield, Backpack,
+  Music, Square, Disc, Play, Pause, Clock, Search, Users, Shield, Backpack,
   Skull, Award, Flag, Sword, Repeat, FlaskConical, Gamepad2,
-  UserCheck, LogOut
+  UserCheck, LogOut, Eye, X
 } from 'lucide-react';
 
 import PergaminoBox from './components/PergaminoBox';
 import AuthModal from './components/AuthModal';
+import EditProfileModal from './components/EditProfileModal';
 import {
   SOUNDTRACK_LIST,
   LOOP_PHASES,
@@ -16,6 +17,141 @@ import {
   MAP_REGIONS,
   STUDIO_TEAM
 } from './data/dualityData';
+
+// --- IMPORTACIONES DE FIREBASE PARA MANTENER LA SESIÓN ---
+import { auth, db } from './firebaseConfig';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+
+// =========================================================
+// MOTOR AUTOMÁTICO DE RECORTE DE FONDO (CHROMA KEY EN VIVO)
+// =========================================================
+const SmartChromaSprite = ({ src, alt, className = '' }) => {
+  const [cleanSrc, setCleanSrc] = useState(src);
+
+  useEffect(() => {
+    let isMounted = true;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = encodeURI(src);
+
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+        const w = canvas.width;
+        const h = canvas.height;
+
+        if (data[3] < 50) return;
+
+        const sampleIdx = (5 * w + 5) * 4;
+        const bgR = data[sampleIdx];
+        const bgG = data[sampleIdx + 1];
+        const bgB = data[sampleIdx + 2];
+
+        const tolerance = 46;
+        const visited = new Uint8Array(w * h);
+        const stack = [
+          0,
+          w - 1,
+          (h - 1) * w,
+          (h - 1) * w + (w - 1),
+          Math.floor(h / 2) * w,
+          Math.floor(h / 2) * w + (w - 1)
+        ];
+
+        for (const s of stack) visited[s] = 1;
+
+        const isBgMatch = (pos) => {
+          const i = pos * 4;
+          const dr = data[i] - bgR;
+          const dg = data[i + 1] - bgG;
+          const db = data[i + 2] - bgB;
+          return (dr * dr + dg * dg + db * db) <= tolerance * tolerance * 3;
+        };
+
+        while (stack.length > 0) {
+          const curr = stack.pop();
+          const idx = curr * 4;
+          data[idx + 3] = 0;
+
+          const x = curr % w;
+          const y = Math.floor(curr / w);
+
+          if (x > 0) {
+            const left = curr - 1;
+            if (!visited[left] && isBgMatch(left)) {
+              visited[left] = 1;
+              stack.push(left);
+            }
+          }
+          if (x < w - 1) {
+            const right = curr + 1;
+            if (!visited[right] && isBgMatch(right)) {
+              visited[right] = 1;
+              stack.push(right);
+            }
+          }
+          if (y > 0) {
+            const up = curr - w;
+            if (!visited[up] && isBgMatch(up)) {
+              visited[up] = 1;
+              stack.push(up);
+            }
+          }
+          if (y < h - 1) {
+            const down = curr + w;
+            if (!visited[down] && isBgMatch(down)) {
+              visited[down] = 1;
+              stack.push(down);
+            }
+          }
+        }
+
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            const p = y * w + x;
+            if (data[p * 4 + 3] > 0) {
+              if (
+                data[(p - 1) * 4 + 3] === 0 ||
+                data[(p + 1) * 4 + 3] === 0 ||
+                data[(p - w) * 4 + 3] === 0 ||
+                data[(p + w) * 4 + 3] === 0
+              ) {
+                const i = p * 4;
+                const dist = Math.sqrt(
+                  Math.pow(data[i] - bgR, 2) +
+                  Math.pow(data[i + 1] - bgG, 2) +
+                  Math.pow(data[i + 2] - bgB, 2)
+                );
+                if (dist < tolerance * 1.6) {
+                  data[i + 3] = Math.floor((dist / (tolerance * 1.6)) * 200);
+                }
+              }
+            }
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        if (isMounted) setCleanSrc(canvas.toDataURL('image/png'));
+      } catch (err) {
+        console.error('Error procesando transparencia:', err);
+      }
+    };
+
+    return () => {
+      isMounted = false;
+    };
+  }, [src]);
+
+  return <img src={cleanSrc} alt={alt} className={className} />;
+};
 
 export default function App() {
   // ---------------------------------------------------------
@@ -29,32 +165,81 @@ export default function App() {
   });
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  // Estados del Grimorio Wiki y Búsqueda
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [currentAvatar, setCurrentAvatar] = useState(user?.avatar || '/avatarares/turnos_slime_verde.webp');
+
+  // ---------------------------------------------------------
+  // 1.5 EFECTO PARA PERSISTENCIA DE SESIÓN CON FIREBASE
+  // ---------------------------------------------------------
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          // Buscamos si el usuario tiene datos en Firestore
+          const userRef = doc(db, 'usuarios', firebaseUser.uid);
+          const userSnap = await getDoc(userRef);
+
+          let userData = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            username: firebaseUser.displayName || 'ALEXIS'
+          };
+
+          if (userSnap.exists()) {
+            userData = { ...userData, ...userSnap.data() };
+          }
+
+          // Actualizamos los estados con la info fresca de la BD
+          setUser(userData);
+          setCurrentAvatar(userData.avatar || '/avatarares/turnos_slime_verde.webp');
+          localStorage.setItem('duality_user', JSON.stringify(userData));
+        } catch (error) {
+          console.error("Error recuperando info del usuario:", error);
+        }
+      } else {
+        // Si no hay usuario logueado en Firebase, limpiamos
+        setUser(null);
+        localStorage.removeItem('duality_user');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Estados del Grimorio Wiki, Búsqueda y Vista Previa de Personaje
   const [activeWikiTab, setActiveWikiTab] = useState('personajes');
   const [wikiSearch, setWikiSearch] = useState('');
+  const [inspectedItem, setInspectedItem] = useState(null);
 
   // Estados de Historia (Bucle Temporal) y Mapa
   const [selectedLoopIdx, setSelectedLoopIdx] = useState(0);
   const [selectedRegionIdx, setSelectedRegionIdx] = useState(0);
 
-  // Estados del Reproductor de Soundtrack (Web Audio API)
+  // Estados del Reproductor de Soundtrack Oficial MP3
   const [activeTrack, setActiveTrack] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [trackProgress, setTrackProgress] = useState(0);
+  const [trackDuration, setTrackDuration] = useState(0);
+
+  const audioRef = useRef(null);
   const audioCtxRef = useRef(null);
-  const audioIntervalRef = useRef(null);
+  const analyserRef = useRef(null);
+  const sourceNodeRef = useRef(null);
+  const animFrameRef = useRef(null);
   const visualizerCanvasRef = useRef(null);
 
   // Estados del Simulador de Combate por Turnos
   const [combat, setCombat] = useState({
-    heroHp: 120,
-    heroMaxHp: 120,
-    heroMp: 60,
-    enemyHp: 180,
-    enemyMaxHp: 180,
+    heroHp: 150,
+    heroMaxHp: 150,
+    heroMp: 80,
+    enemyHp: 220,
+    enemyMaxHp: 220,
     realm: 'light',
     finished: false,
     logs: [
-      { text: '⚔️ ¡Encuentro iniciado! Un Devorador Abisal bloquea el sendero del bosque.', highlight: true },
-      { text: '• Consejo de la Guía de Combate: Alterna la Dualidad para potenciar tu daño o reducir el ataque enemigo.', highlight: false }
+      { text: '⚔️ ¡Encuentro iniciado! Una Masa Oscura de Corrosión bloquea el paso.', highlight: true },
+      { text: '• Consejo de la Guía: Eres un ser Primordial. Alterna tu Dualidad para evitar que la corrupción te desintegre.', highlight: false }
     ]
   });
 
@@ -68,70 +253,126 @@ export default function App() {
   };
 
   // ---------------------------------------------------------
-  // 2. LÓGICA DEL SINTETIZADOR DE AUDIO (SOUNDTRACK EN VIVO)
+  // 2. REPRODUCTOR MP3 OFICIAL + VISUALIZADOR DE FRECUENCIAS
   // ---------------------------------------------------------
-  const drawVisualizerFrame = (freq, step) => {
+  const drawIdleVisualizer = () => {
     const canvas = visualizerCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#120E1E';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const bars = 28;
+    const bars = 32;
     const barWidth = (canvas.width / bars) - 3;
     for (let i = 0; i < bars; i++) {
-      const h = Math.max(8, Math.sin((i + step) * 0.6) * 28 + (freq % 30));
+      const h = 6 + Math.sin(i * 0.5) * 4;
       ctx.fillStyle = i % 2 === 0 ? '#D4A537' : '#2F4A8A';
       ctx.fillRect(i * (barWidth + 3), canvas.height - h, barWidth, h);
     }
   };
 
-  const stopSoundtrack = () => {
-    if (audioIntervalRef.current) clearInterval(audioIntervalRef.current);
-    audioIntervalRef.current = null;
-    setActiveTrack(null);
-  };
+  const renderFrequencyVisualizer = () => {
+    const canvas = visualizerCanvasRef.current;
+    const analyser = analyserRef.current;
+    if (!canvas || !analyser) return;
 
-  const playTrack = (track) => {
-    stopSoundtrack();
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (audioCtxRef.current.state === 'suspended') {
-      audioCtxRef.current.resume();
-    }
+    const ctx = canvas.getContext('2d');
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
 
-    setActiveTrack(track);
-    let step = 0;
+    const draw = () => {
+      animFrameRef.current = requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(dataArray);
 
-    const playNextNote = () => {
-      const ctx = audioCtxRef.current;
-      const freq = track.notes[step % track.notes.length];
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      ctx.fillStyle = '#120E1E';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      osc.type = track.wave;
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      gain.gain.setValueAtTime(0.08, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (track.tempo / 1000));
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + (track.tempo / 1000));
-
-      drawVisualizerFrame(freq, step);
-      step++;
+      const bars = 32;
+      const barWidth = (canvas.width / bars) - 3;
+      for (let i = 0; i < bars; i++) {
+        const val = dataArray[i] || 0;
+        const h = Math.max(5, (val / 255) * (canvas.height - 6));
+        ctx.fillStyle = i % 2 === 0 ? '#D4A537' : '#2F4A8A';
+        ctx.fillRect(i * (barWidth + 3), canvas.height - h, barWidth, h);
+      }
     };
 
-    playNextNote();
-    audioIntervalRef.current = setInterval(playNextNote, track.tempo);
-    showToast(`Reproduciendo: ${track.titulo}`);
+    cancelAnimationFrame(animFrameRef.current);
+    draw();
+  };
+
+  const stopSoundtrack = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    cancelAnimationFrame(animFrameRef.current);
+    setIsPlaying(false);
+    setActiveTrack(null);
+    setTrackProgress(0);
+    drawIdleVisualizer();
+  };
+
+  const playTrack = async (track) => {
+    const audioEl = audioRef.current;
+    if (!audioEl) return;
+
+    if (activeTrack && activeTrack.id === track.id) {
+      if (isPlaying) {
+        audioEl.pause();
+        cancelAnimationFrame(animFrameRef.current);
+        setIsPlaying(false);
+      } else {
+        await audioEl.play();
+        setIsPlaying(true);
+        renderFrequencyVisualizer();
+      }
+      return;
+    }
+
+    try {
+      audioEl.src = encodeURI(track.src);
+      audioEl.load();
+
+      if (!audioCtxRef.current) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtxRef.current = new AudioContext();
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        await audioCtxRef.current.resume();
+      }
+
+      if (!sourceNodeRef.current) {
+        sourceNodeRef.current = audioCtxRef.current.createMediaElementSource(audioEl);
+        analyserRef.current = audioCtxRef.current.createAnalyser();
+        analyserRef.current.fftSize = 64;
+        sourceNodeRef.current.connect(analyserRef.current);
+        analyserRef.current.connect(audioCtxRef.current.destination);
+      }
+
+      await audioEl.play();
+      setActiveTrack(track);
+      setIsPlaying(true);
+      renderFrequencyVisualizer();
+      showToast(`Reproduciendo: ${track.titulo}`);
+    } catch (err) {
+      console.error('Error al reproducir pista:', err);
+      showToast('No se pudo cargar el archivo de audio.');
+    }
+  };
+
+  const formatTime = (sec) => {
+    if (!sec || isNaN(sec)) return '00:00';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
   useEffect(() => {
-    drawVisualizerFrame(293, 1);
-    return () => stopSoundtrack();
+    drawIdleVisualizer();
+    return () => {
+      cancelAnimationFrame(animFrameRef.current);
+    };
   }, []);
 
   // ---------------------------------------------------------
@@ -139,14 +380,14 @@ export default function App() {
   // ---------------------------------------------------------
   const resetCombatDemo = () => {
     setCombat({
-      heroHp: 120,
-      heroMaxHp: 120,
-      heroMp: 60,
-      enemyHp: 180,
-      enemyMaxHp: 180,
+      heroHp: 150,
+      heroMaxHp: 150,
+      heroMp: 80,
+      enemyHp: 220,
+      enemyMaxHp: 220,
       realm: 'light',
       finished: false,
-      logs: [{ text: '🔄 Bucle reiniciado. ¡Nuevo combate por turnos listo!', highlight: true }]
+      logs: [{ text: '🔄 La Diosa de la Destrucción ha reiniciado el bucle. ¡Nuevo combate listo!', highlight: true }]
     });
   };
 
@@ -160,46 +401,46 @@ export default function App() {
     const newLogs = [...logs];
 
     if (action === 'attack') {
-      const dmg = realm === 'light' ? 32 : 24;
+      const dmg = realm === 'light' ? 38 : 28;
       enemyHp = Math.max(0, enemyHp - dmg);
-      newLogs.unshift({ text: `🗡️ Kaelen ejecuta Corte Áureo e inflige ${dmg} de daño al Devorador.`, highlight: false });
+      newLogs.unshift({ text: `🗡️ Ópalo ejecuta Corte Primordial e inflige ${dmg} de daño a la Masa Oscura.`, highlight: false });
     } else if (action === 'skill') {
-      if (heroMp < 20) {
-        newLogs.unshift({ text: '⚠️ No tienes suficiente Energía Astral (MP) para Juicio Solar.', highlight: false });
+      if (heroMp < 25) {
+        newLogs.unshift({ text: '⚠️ Tu energía Primordial (MP) es inestable. No puedes usar la Furia del Bucle.', highlight: false });
         setCombat({ ...combat, logs: newLogs });
         return;
       }
-      heroMp -= 20;
-      const dmg = realm === 'light' ? 54 : 40;
+      heroMp -= 25;
+      const dmg = realm === 'light' ? 65 : 45;
       enemyHp = Math.max(0, enemyHp - dmg);
-      newLogs.unshift({ text: `✨ ¡Juicio Solar impacta de lleno causando ${dmg} de daño crítico!`, highlight: true });
+      newLogs.unshift({ text: `✨ ¡Ópalo canaliza la Creación! Furia del Bucle causa ${dmg} de daño crítico.`, highlight: true });
     } else if (action === 'shift') {
       realm = realm === 'light' ? 'void' : 'light';
-      heroMp = Math.min(60, heroMp + 15);
+      heroMp = Math.min(80, heroMp + 20);
       newLogs.unshift({
-        text: `🌀 ¡Kaelen invoca el Ouroboros y cambia la realidad al ${realm === 'light' ? 'Reino de la Luz' : 'Reino del Vacío'}! (+15 MP)`,
+        text: `🌀 ¡Ópalo abraza su Destrucción interna y cambia al ${realm === 'light' ? 'Reino de la Luz' : 'Reino del Vacío'}! (+20 MP)`,
         highlight: true
       });
     } else if (action === 'heal') {
-      heroHp = Math.min(heroMaxHp, heroHp + 45);
-      newLogs.unshift({ text: '🧪 Bebes un Elixir de Dualidad y restauras +45 HP.', highlight: false });
+      heroHp = Math.min(heroMaxHp, heroHp + 55);
+      newLogs.unshift({ text: '🧪 Bebes Agua Sagrada Exorcista y detienes la corrosión (+55 HP).', highlight: false });
     }
 
     if (enemyHp <= 0) {
-      newLogs.unshift({ text: '🏆 ¡VICTORIA! El Devorador Abisal se disipa. Has obtenido +120 EXP y 1 Reliquia del Gremio.', highlight: true });
+      newLogs.unshift({ text: '🏆 ¡VICTORIA! La Masa Oscura se desintegra. Purificaste la zona y proteges al Gremio.', highlight: true });
       setCombat({ ...combat, heroHp, heroMp, enemyHp, realm, finished: true, logs: newLogs });
-      showToast('¡Victoria en el Simulador de Combate!');
+      showToast('¡Corrosión eliminada con éxito!');
       return;
     }
 
-    const enemyDmg = realm === 'void' ? 14 : 22;
+    const enemyDmg = realm === 'void' ? 18 : 28;
     heroHp = Math.max(0, heroHp - enemyDmg);
-    newLogs.unshift({ text: `💀 El Devorador Abisal lanza Garra del Olvido (-${enemyDmg} HP).`, highlight: false });
+    newLogs.unshift({ text: `💀 La Masa Oscura te infecta con Toque Abisal (-${enemyDmg} HP).`, highlight: false });
 
     let finished = false;
     if (heroHp <= 0) {
       finished = true;
-      newLogs.unshift({ text: '⏳ El tiempo se agota... Pero el Bucle Temporal te permite reintentar el combate.', highlight: true });
+      newLogs.unshift({ text: '⏳ La Destrucción te ha consumido... Pero despertarás amnésico en un nuevo bucle.', highlight: true });
     }
 
     setCombat({ heroHp, heroMaxHp, heroMp, enemyHp, enemyMaxHp, realm, finished, logs: newLogs });
@@ -245,13 +486,71 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col selection:bg-goldPrimary selection:text-dualityDeep">
 
+      {/* Elemento de Audio Nativo Oculto para reproducir los MP3 de /public/audio/ */}
+      <audio
+        ref={audioRef}
+        onTimeUpdate={() => setTrackProgress(audioRef.current?.currentTime || 0)}
+        onLoadedMetadata={() => setTrackDuration(audioRef.current?.duration || 0)}
+        onEnded={() => {
+          setIsPlaying(false);
+          cancelAnimationFrame(animFrameRef.current);
+          drawIdleVisualizer();
+        }}
+        crossOrigin="anonymous"
+      />
+
+      {/* =========================================================
+          SISTEMA DE ANIMACIONES AVANZADAS PARA PERSONAJES Y TARJETAS
+          ========================================================= */}
+      <style>{`
+        @keyframes heroFloat {
+          0%, 100% { transform: translateY(0px) scale(1); }
+          50% { transform: translateY(-10px) scale(1.03); }
+        }
+        @keyframes portraitBreathe {
+          0%, 100% { transform: translateY(0px) scale(1); }
+          50% { transform: translateY(-5px) scale(1.04); }
+        }
+        @keyframes holographicSweep {
+          0% { transform: translateX(-140%) skewX(-20deg); }
+          100% { transform: translateX(240%) skewX(-20deg); }
+        }
+        @keyframes auraPulseGold {
+          0%, 100% { filter: drop-shadow(0 6px 12px rgba(0,0,0,0.85)) drop-shadow(0 0 10px rgba(212, 165, 55, 0.45)); }
+          50% { filter: drop-shadow(0 12px 18px rgba(0,0,0,0.9)) drop-shadow(0 0 22px rgba(240, 207, 110, 0.95)); }
+        }
+        .sprite-hero-anim {
+          animation: heroFloat 4.2s ease-in-out infinite, auraPulseGold 4.2s ease-in-out infinite;
+        }
+        .sprite-card-anim {
+          animation: portraitBreathe 3.6s ease-in-out infinite;
+          filter: drop-shadow(0 6px 10px rgba(0,0,0,0.85)) drop-shadow(0 0 8px rgba(212, 165, 55, 0.35));
+          transition: all 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .wiki-card-pro:hover .sprite-card-anim {
+          transform: translateY(-8px) scale(1.14) !important;
+          filter: drop-shadow(0 12px 16px rgba(0,0,0,0.95)) drop-shadow(0 0 18px rgba(240, 207, 110, 0.95));
+        }
+        .shimmer-layer::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent, rgba(240, 207, 110, 0.32), transparent);
+          transform: translateX(-140%) skewX(-20deg);
+          pointer-events: none;
+        }
+        .wiki-card-pro:hover .shimmer-layer::after {
+          animation: holographicSweep 1.1s ease-in-out;
+        }
+      `}</style>
+
       {/* =========================================================
           1. BARRA DE NAVEGACIÓN PRINCIPAL
           ========================================================= */}
       <header className="sticky top-0 z-40 bg-[#151024]/95 backdrop-blur-md border-b-2 border-goldPrimary/50 shadow-2xl">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
 
-          {/* Logo Ouroboros Izquierdo con Movimiento y Aura */}
+          {/* Logo Ouroboros Animado */}
           <a
             href="#inicio"
             onClick={() => setActiveNav('inicio')}
@@ -275,7 +574,7 @@ export default function App() {
             </div>
           </a>
 
-          {/* Enlaces Desktop (Visibles en pantallas medianas y grandes) */}
+          {/* Enlaces Desktop */}
           <nav className="hidden lg:flex items-center gap-0.5 text-[11px] font-fantasy font-bold tracking-wider">
             {[
               { id: 'soundtrack', label: 'Soundtrack' },
@@ -301,22 +600,32 @@ export default function App() {
             ))}
           </nav>
 
-          {/* Botones de Acción: Login e Instalar PWA */}
+          {/* Botones de Acción */}
           <div className="flex items-center gap-2 shrink-0">
             {user ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/90 border border-goldPrimary text-goldLight font-fantasy text-xs">
-                <UserCheck className="w-4 h-4 text-emerald-400" />
-                <span className="font-bold hidden md:inline">{user.username}</span>
+              <div className="flex items-center gap-2">
+                <div
+                  onClick={() => setIsEditModalOpen(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-950/90 hover:bg-emerald-900 border border-goldPrimary text-goldLight font-fantasy text-xs cursor-pointer transition-all shadow-[0_0_10px_rgba(212,165,55,0.2)]"
+                  title="Cambiar Insignia"
+                >
+                  <div className="w-6 h-6 rounded-full overflow-hidden border border-goldPrimary bg-black shrink-0">
+                    <img src={currentAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                  </div>
+                  <span className="font-bold hidden md:inline uppercase">{user.username}</span>
+                </div>
+
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    await auth.signOut();
                     localStorage.removeItem('duality_user');
                     setUser(null);
                     showToast('Sesión cerrada correctamente');
                   }}
                   title="Cerrar sesión"
-                  className="ml-1 text-red-400 hover:text-red-300"
+                  className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-400/10 transition-all"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <LogOut className="w-4 h-4" />
                 </button>
               </div>
             ) : (
@@ -345,14 +654,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* Menú Móvil Desplegable */}
+        {/* Menú Móvil */}
         {mobileMenuOpen && (
           <div className="lg:hidden bg-[#120E1E] border-t border-goldPrimary/40 px-4 py-4 font-fantasy text-xs">
             <div className="grid grid-cols-2 gap-2">
               <a href="#soundtrack" onClick={() => { setActiveNav('soundtrack'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🎵 Soundtrack</a>
               <a href="#historia" onClick={() => { setActiveNav('historia'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">📜 Historia y Bucle</a>
               <a href="#grimorio" onClick={() => { setActiveNav('grimorio'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">📖 Grimorio Wiki</a>
-              <a href="#combate" onClick={() => { setActiveNav('combate'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-guildBlue/30 text-goldLight border border-goldPrimary/30">⚔️ Simulador Combate</a>
+              <a href="#combate" onClick={() => { setActiveNav('combate'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">⚔️ Simulador Combate</a>
               <a href="#mapa" onClick={() => { setActiveNav('mapa'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🗺️ Mapa del Mundo</a>
               <a href="#requisitos" onClick={() => { setActiveNav('requisitos'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">💻 Requisitos PC/Móvil</a>
               <a href="#equipo" onClick={() => { setActiveNav('equipo'); setMobileMenuOpen(false); }} className="p-2.5 rounded bg-guildBlue/30 text-goldLight border border-goldPrimary/30">🛡️ Estudio</a>
@@ -362,7 +671,7 @@ export default function App() {
       </header>
 
       {/* =========================================================
-          2. HERO PRINCIPAL CON EL DRAGÓN OUROBOROS OFICIAL
+          2. HERO PRINCIPAL CON EL DRAGÓN OUROBOROS
           ========================================================= */}
       <section id="inicio" className="relative z-10 py-14 sm:py-20 px-4 border-b-2 border-goldPrimary/40 overflow-hidden">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
@@ -377,11 +686,11 @@ export default function App() {
             </h1>
 
             <p className="text-xl sm:text-2xl font-fantasy text-parchmentLight leading-snug">
-              "Dos realidades enfrentadas. Un bucle temporal inquebrantable. Solo el Gremio de Exploradores recuerda lo que el Vacío devoró."
+              "La Creación y la Destrucción en guerra eterna. Un bucle infinito. Y dos almas primordiales atrapadas en el medio."
             </p>
 
             <p className="text-base sm:text-lg text-slate-300 max-w-2xl mx-auto lg:mx-0 leading-relaxed">
-              Adéntrate en una odisea de fantasía oscura medieval. Explora biomas fracturados en escenarios de plataformas, domina las <strong>5 Clases Ancestrales</strong> y desafía a las Criaturas del Vacío en combates tácticos por turnos antes de que el reloj del Ouroboros reinicie tu existencia.
+              Adéntrate en una odisea de fantasía oscura medieval. Explora biomas corrompidos por el Vacío, sobrevive a la Corrosión Abisal y rompe el ciclo inquebrantable junto al Gremio de Exploradores.
             </p>
 
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2">
@@ -408,14 +717,10 @@ export default function App() {
             </div>
           </div>
 
-          {/* Emblema Principal del Ouroboros con Portal Astral Animado */}
           <div className="lg:col-span-5 flex flex-col items-center">
             <div className="relative w-72 h-72 sm:w-80 sm:h-80 flex items-center justify-center group">
-
-              {/* 1. Aura Mística Pulsante de Fondo */}
               <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-guildBlue/50 via-goldPrimary/30 to-ribbonRed/40 blur-2xl animate-pulse"></div>
 
-              {/* 2. Anillos Rúnicos del Reloj (Giran en sentido opuesto al dragón) */}
               <svg className="absolute inset-0 w-full h-full rune-orbit-reverse pointer-events-none" viewBox="0 0 240 240" fill="none">
                 <circle cx="120" cy="120" r="114" stroke="#D4A537" strokeWidth="1.5" strokeDasharray="4 8" opacity="0.6" />
                 <circle cx="120" cy="120" r="104" stroke="#2F4A8A" strokeWidth="3" opacity="0.85" />
@@ -426,17 +731,14 @@ export default function App() {
                 <polygon points="238,120 226,124 226,116" fill="#F0CF6E" />
               </svg>
 
-              {/* 3. Núcleo Oscuro para resaltar el dorado */}
               <div className="absolute w-52 h-52 sm:w-60 sm:h-60 rounded-full bg-[#120E1E]/90 border border-goldPrimary/30 shadow-inner"></div>
 
-              {/* 4. Dragón Ouroboros Oficial Animado */}
               <img
                 src="/ouroboros-dorado.png"
                 alt="Emblema Ouroboros Duality"
                 className="w-56 h-56 sm:w-64 sm:h-64 object-contain ouroboros-spin relative z-10 group-hover:scale-105 transition-transform duration-500"
               />
 
-              {/* 5. Insignia Inferior Flotante */}
               <div className="absolute -bottom-3 bg-[#120E1E] border-2 border-goldPrimary px-5 py-2 rounded-full shadow-[0_0_20px_rgba(212,165,55,0.5)] text-center z-20">
                 <span className="font-fantasy text-xs font-bold text-goldLight tracking-widest">
                   EL CICLO COMIENZA
@@ -448,31 +750,33 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          3. SECCIÓN SOUNDTRACK Y SINTETIZADOR WEB AUDIO API
+          3. SECCIÓN SOUNDTRACK OFICIAL
           ========================================================= */}
       <section id="soundtrack" className="relative z-10 py-14 px-4 bg-[#141022]/90 border-y-2 border-goldPrimary/40">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-5 space-y-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded bg-amber-900/60 border border-goldPrimary text-goldLight font-fantasy text-xs">
-              <Music className="w-4 h-4" /> SECCIÓN SOUNDTRACK
+              <Music className="w-4 h-4" /> BANDA SONORA OFICIAL
             </div>
-            <h2 className="font-display text-3xl sm:text-4xl font-bold text-goldLight">Soundtrack Oficial y Pistas Digitales</h2>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold text-goldLight">Soundtrack Oficial de DUALITY</h2>
             <p className="text-slate-300 text-base leading-relaxed">
-              Escucha un adelanto en tiempo real de las composiciones atmosféricas que acompañan cada combate y región de <strong>DUALITY</strong>.
+              Escucha las <strong>8 pistas originales</strong> del juego (Taberna, Posada, Bosques y Combates) directamente desde la biblioteca de audio oficial.
             </p>
 
             <div className="p-5 rounded-2xl bg-[#1E1830] border-2 border-goldPrimary shadow-2xl space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
-                  <span className="text-[11px] font-fantasy text-goldPrimary uppercase tracking-widest">Reproduciendo Pista:</span>
+                  <span className="text-[11px] font-fantasy text-goldPrimary uppercase tracking-widest">
+                    {isPlaying ? '🔊 Reproduciendo Ahora:' : '⏸️ En Pausa / Espera:'}
+                  </span>
                   <h4 className="font-fantasy font-bold text-lg text-goldLight">
-                    {activeTrack ? activeTrack.titulo : 'Selecciona una pista para escuchar'}
+                    {activeTrack ? activeTrack.titulo : 'Selecciona una pista del catálogo'}
                   </h4>
                 </div>
                 {activeTrack && (
                   <button
                     onClick={stopSoundtrack}
-                    className="px-3 py-1.5 rounded-lg bg-ribbonRed text-white font-fantasy text-xs font-bold flex items-center gap-1"
+                    className="px-3 py-1.5 rounded-lg bg-ribbonRed text-white font-fantasy text-xs font-bold flex items-center gap-1 shrink-0 hover:brightness-110"
                   >
                     <Square className="w-3.5 h-3.5" /> Detener
                   </button>
@@ -485,6 +789,28 @@ export default function App() {
                 height="64"
                 className="w-full h-16 rounded-lg bg-[#120E1E] border border-goldPrimary/30"
               ></canvas>
+
+              {/* Barra de Progreso Interactiva del MP3 */}
+              {activeTrack && (
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min="0"
+                    max={trackDuration || 100}
+                    value={trackProgress}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (audioRef.current) audioRef.current.currentTime = val;
+                      setTrackProgress(val);
+                    }}
+                    className="w-full accent-goldPrimary cursor-pointer h-1.5 rounded-lg bg-[#120E1E]"
+                  />
+                  <div className="flex justify-between text-[11px] font-fantasy text-goldLight/80">
+                    <span>{formatTime(trackProgress)}</span>
+                    <span>{formatTime(trackDuration)}</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -492,37 +818,58 @@ export default function App() {
             <PergaminoBox bodyClassName="space-y-3">
               <div className="flex items-center justify-between border-b border-[#8F7643]/40 pb-2">
                 <h3 className="font-fantasy font-bold text-lg text-guildBlue flex items-center gap-2">
-                  <Disc className="w-5 h-5 text-ribbonRed" /> Catálogo de Pistas
+                  <Disc className="w-5 h-5 text-ribbonRed" /> Catálogo Oficial
                 </h3>
-                <span className="text-xs font-bold text-parchmentText">Audio Sintetizado en Vivo</span>
               </div>
 
-              {SOUNDTRACK_LIST.map((track) => (
-                <div
-                  key={track.id}
-                  className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 p-3 rounded-xl bg-[#3B2A1A]/10 border border-[#8F7643]/50 hover:bg-[#3B2A1A]/15 transition"
-                >
-                  <div className="flex items-center gap-3">
-                    <button
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[340px] overflow-y-auto pr-1">
+                {SOUNDTRACK_LIST.map((track) => {
+                  const isCurrent = activeTrack?.id === track.id;
+                  return (
+                    <div
+                      key={track.id}
                       onClick={() => playTrack(track)}
-                      className="w-10 h-10 rounded-full bg-guildBlue text-goldLight flex items-center justify-center hover:scale-105 transition shadow"
+                      className={`cursor-pointer flex items-center justify-between gap-3 p-3 rounded-xl border transition ${
+                        isCurrent
+                          ? 'bg-guildBlue/20 border-guildBlue shadow-md'
+                          : 'bg-[#3B2A1A]/10 border-[#8F7643]/50 hover:bg-[#3B2A1A]/20'
+                      }`}
                     >
-                      <Play className="w-5 h-5" />
-                    </button>
-                    <div>
-                      <h4 className="font-fantasy font-bold text-sm text-parchmentText">{track.titulo}</h4>
-                      <p className="text-xs text-parchmentText/80">{track.subtitulo}</p>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button
+                          type="button"
+                          className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition shadow ${
+                            isCurrent && isPlaying
+                              ? 'bg-ribbonRed text-white animate-pulse'
+                              : 'bg-guildBlue text-goldLight hover:scale-105'
+                          }`}
+                        >
+                          {isCurrent && isPlaying ? (
+                            <Pause className="w-4 h-4" />
+                          ) : (
+                            <Play className="w-4 h-4" />
+                          )}
+                        </button>
+                        <div className="min-w-0">
+                          <h4 className="font-fantasy font-bold text-xs sm:text-sm text-parchmentText truncate">
+                            {track.titulo}
+                          </h4>
+                          <p className="text-[11px] text-parchmentText/80 truncate">
+                            {track.subtitulo}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  );
+                })}
+              </div>
             </PergaminoBox>
           </div>
         </div>
       </section>
 
       {/* =========================================================
-          4. HISTORIA, OBJETIVO, GÉNERO Y SIMULADOR DEL BUCLE TEMPORAL
+          4. HISTORIA Y ESCAPARATE ESTELAR (/personajes/)
           ========================================================= */}
       <section id="historia" className="relative z-10 py-16 px-4 max-w-6xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-10 space-y-2">
@@ -544,29 +891,73 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="w-full h-44 rounded-xl border-2 border-[#3B2A1A] overflow-hidden relative bg-[#1E1830] shadow-inner">
-                  <svg className="w-full h-full object-cover" viewBox="0 0 600 220">
-                    <rect width="600" height="220" fill="#1E1830" />
-                    <circle cx="160" cy="80" r="42" fill="#D4A537" opacity="0.9" />
-                    <circle cx="172" cy="76" r="34" fill="#1E1830" />
-                    <circle cx="430" cy="75" r="36" fill="#2F4A8A" opacity="0.7" />
-                    <path d="M0 170 Q120 110 250 165 T600 135 L600 220 L0 220 Z" fill="#8F7643" />
-                    <path d="M0 190 Q200 140 380 180 T600 160 L600 220 L0 220 Z" fill="#3B2A1A" />
-                    <text x="300" y="205" textAnchor="middle" fill="#F0CF6E" fontFamily="Cinzel" fontSize="13" fontWeight="bold">
-                      EL ECLIPSE DE LAS DOS REALIDADES
-                    </text>
+                {/* --- VITRINA DE ÓPALO Y ZYREN CON RUTAS EN /personajes/ --- */}
+                <div className="w-full rounded-2xl border-2 border-goldPrimary/80 overflow-hidden relative bg-[radial-gradient(ellipse_at_center,_#2F4A8A_0%,_#151024_55%,_#090612_100%)] p-5 shadow-[inset_0_0_50px_rgba(0,0,0,0.9)]">
+                  <svg className="absolute left-1/4 top-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 rune-orbit-reverse opacity-25 pointer-events-none" viewBox="0 0 200 200">
+                    <circle cx="100" cy="100" r="88" stroke="#F0CF6E" strokeWidth="2" strokeDasharray="8 6" fill="none" />
+                    <circle cx="100" cy="100" r="70" stroke="#D4A537" strokeWidth="1" fill="none" />
                   </svg>
+                  <svg className="absolute left-3/4 top-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 rune-orbit-reverse opacity-25 pointer-events-none" viewBox="0 0 200 200">
+                    <circle cx="100" cy="100" r="88" stroke="#EF4444" strokeWidth="2" strokeDasharray="8 6" fill="none" />
+                    <circle cx="100" cy="100" r="70" stroke="#F0CF6E" strokeWidth="1" fill="none" />
+                  </svg>
+
+                  <div className="relative z-10 grid grid-cols-2 gap-4 items-end justify-items-center">
+
+                    {/* ÓPALO */}
+                    <div
+                      onClick={() => setInspectedItem(WIKI_CATEGORIES.personajes.items[0])}
+                      className="flex flex-col items-center text-center group cursor-pointer"
+                    >
+                      <div className="h-60 sm:h-68 flex items-end justify-center relative">
+                        <div className="absolute -inset-3 rounded-full bg-goldPrimary/20 blur-xl group-hover:bg-goldLight/40 transition-all"></div>
+                        <SmartChromaSprite
+                          src="/personajes/Opalo.jpg"
+                          alt="Ópalo - Ser Primordial"
+                          className="h-full w-auto object-contain sprite-hero-anim relative z-10 group-hover:scale-110 transition-transform duration-500"
+                        />
+                      </div>
+                      <div className="mt-3 relative z-20">
+                        <span className="px-4 py-1 rounded-full bg-gradient-to-r from-guildBlue to-[#1a2d5c] border border-goldLight text-goldLight font-fantasy font-black text-xs sm:text-sm tracking-wider shadow-[0_0_15px_rgba(212,165,55,0.6)] group-hover:shadow-[0_0_25px_rgba(240,207,110,1)] transition-all">
+                          ÓPALO
+                        </span>
+                        <span className="block mt-1 text-[10px] text-parchmentLight font-bold uppercase tracking-widest">
+                          Primordial (Él)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ZYREN */}
+                    <div
+                      onClick={() => setInspectedItem(WIKI_CATEGORIES.personajes.items[1])}
+                      className="flex flex-col items-center text-center group cursor-pointer"
+                    >
+                      <div className="h-60 sm:h-68 flex items-end justify-center relative">
+                        <div className="absolute -inset-3 rounded-full bg-ribbonRed/25 blur-xl group-hover:bg-ribbonRed/50 transition-all"></div>
+                        <SmartChromaSprite
+                          src="/personajes/Zyren.jpg"
+                          alt="Zyren - Ser Primordial"
+                          className="h-full w-auto object-contain sprite-hero-anim relative z-10 group-hover:scale-110 transition-transform duration-500"
+                        />
+                      </div>
+                      <div className="mt-3 relative z-20">
+                        <span className="px-4 py-1 rounded-full bg-gradient-to-r from-ribbonRed to-[#540c0c] border border-goldLight text-goldLight font-fantasy font-black text-xs sm:text-sm tracking-wider shadow-[0_0_15px_rgba(185,28,28,0.6)] group-hover:shadow-[0_0_25px_rgba(240,207,110,1)] transition-all">
+                          ZYREN
+                        </span>
+                        <span className="block mt-1 text-[10px] text-parchmentLight font-bold uppercase tracking-widest">
+                          Primordial (Ella)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-3 text-base leading-relaxed">
+                <div className="space-y-3 text-base leading-relaxed pt-2">
                   <p>
-                    <strong>Género del Videojuego:</strong> Aventura de Acción y Plataformas 2D combinada con Combate RPG Táctico por Turnos y estética de fantasía oscura medieval.
+                    <strong>El Origen del Conflicto:</strong> El mundo es el campo de batalla eterno entre el Dios de la Creación y la Diosa de la Destrucción, condenado a aniquilarse y reconstruirse en un bucle infinito.
                   </p>
                   <p>
-                    <strong>Objetivo Principal:</strong> Guiar a tu escuadrón del <em>Gremio de Exploradores</em> a través de biomas fracturados, recolectar las Reliquias del Tiempo, derrotar a los Señores del Vacío y romper el ciclo del Ouroboros.
-                  </p>
-                  <p>
-                    <strong>La Historia:</strong> Siglos atrás, Aethelgard existía en armonía entre la Luz Áurea y el Velo Nocturno. Cuando un experimento prohibido buscó detener la muerte, el tiempo mismo se quebró en un <strong>Bucle Temporal</strong>.
+                    <strong>La Anomalía Primordial:</strong> Despiertas amnésico, rescatado por una maga (Elizaveta) y un pícaro híbrido (Rasku) del Gremio. Como un ser primordial de segunda generación, eres el único capaz de dominar tanto la creación como la destrucción sin que el tiempo borre tu existencia.
                   </p>
                 </div>
               </div>
@@ -584,7 +975,7 @@ export default function App() {
               </div>
 
               <p className="text-sm">
-                Haz clic en cada fase del reloj para descubrir cómo el bucle altera la partida y la memoria de los personajes:
+                Haz clic en cada fase del reloj para descubrir cómo avanza la corrosión:
               </p>
 
               <div className="grid grid-cols-2 gap-2 font-fantasy text-xs">
@@ -619,7 +1010,7 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          5. EL GRIMORIO DE DUALITY (WIKI CON 6 CATEGORÍAS Y BUSCADOR)
+          5. EL GRIMORIO DE DUALITY
           ========================================================= */}
       <section id="grimorio" className="relative z-10 py-16 px-4 bg-[#141022]/90 border-y-2 border-goldPrimary/40">
         <div className="max-w-7xl mx-auto space-y-8">
@@ -630,7 +1021,7 @@ export default function App() {
               </span>
               <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">El Grimorio de DUALITY</h2>
               <p className="text-slate-300 text-base">
-                Consulta compañeros, las 5 clases, ítems, criaturas del vacío, el gremio y las facciones del mundo.
+                Pasa el cursor o haz clic sobre cualquier personaje para inspeccionar su arte sin fondo con animación astral.
               </p>
             </div>
 
@@ -646,7 +1037,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Pestañas de Categorías */}
           <div className="flex items-center gap-2 overflow-x-auto pb-2 font-fantasy text-xs sm:text-sm font-bold">
             {[
               { key: 'personajes', label: 'Personajes', Icon: Users },
@@ -684,24 +1074,56 @@ export default function App() {
             {wikiView.items.length === 0 ? (
               <div className="text-center py-12 space-y-2">
                 <p className="font-display text-xl font-bold text-parchmentText">No se hallaron registros en los pergaminos</p>
-                <p className="text-sm text-parchmentText/80">Intenta con otro término (ej. "Kaelen", "Guerrero", "Espada", "Gremio").</p>
+                <p className="text-sm text-parchmentText/80">Intenta con otro término (ej. "Ópalo", "Elizaveta", "Rasku", "Calabaza").</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {wikiView.items.map((item, idx) => (
                   <div
                     key={idx}
-                    className="p-4 rounded-xl bg-[#3B2A1A]/10 border-2 border-[#8F7643]/60 hover:bg-[#3B2A1A]/15 transition flex gap-3.5 items-start"
+                    onClick={() => item.imagen && setInspectedItem(item)}
+                    className={`wiki-card-pro p-4 rounded-2xl bg-[#3B2A1A]/10 border-2 border-[#8F7643]/70 hover:border-guildBlue hover:bg-[#3B2A1A]/20 transition-all duration-300 flex gap-4 items-center shadow-md hover:shadow-xl ${
+                      item.imagen ? 'cursor-pointer' : ''
+                    }`}
                   >
-                    <div className="w-12 h-12 rounded-xl bg-guildBlue text-goldLight border-2 border-goldPrimary flex items-center justify-center shrink-0 shadow">
-                      <Sparkles className="w-6 h-6" />
-                    </div>
+                    {item.imagen ? (
+                      <div className="shimmer-layer relative w-28 h-36 sm:w-32 sm:h-40 rounded-2xl bg-[radial-gradient(circle_at_50%_35%,_#2F4A8A_0%,_#161124_65%,_#0B0813_100%)] border-2 border-goldPrimary flex items-center justify-center shrink-0 overflow-hidden shadow-[0_8px_20px_rgba(0,0,0,0.65)] p-1.5">
+                        <div className="absolute w-24 h-24 rounded-full border border-dashed border-goldLight/40 rune-orbit-reverse pointer-events-none"></div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0B0813] via-transparent to-transparent opacity-60 pointer-events-none z-10"></div>
+
+                        <SmartChromaSprite
+                          src={item.imagen}
+                          alt={item.nombre}
+                          className="w-full h-full object-contain object-top sprite-card-anim relative z-10"
+                        />
+
+                        <span className="absolute bottom-1.5 right-1.5 z-20 p-1 rounded-full bg-black/70 border border-goldPrimary/60 text-goldLight opacity-80">
+                          <Eye className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl bg-guildBlue text-goldLight border-2 border-goldPrimary flex items-center justify-center shrink-0 shadow-lg">
+                        <Sparkles className="w-7 h-7 animate-pulse" />
+                      </div>
+                    )}
+
                     <div className="space-y-1.5 flex-1">
-                      <h4 className="font-fantasy font-bold text-base text-parchmentText leading-tight">{item.nombre}</h4>
-                      <div className="text-xs font-fantasy font-bold text-ribbonRed">{item.subtitulo}</div>
-                      <p className="text-sm text-parchmentText leading-relaxed">{item.descripcion}</p>
-                      <div className="pt-1.5 mt-1.5 border-t border-[#8F7643]/40 text-xs font-fantasy font-bold text-guildBlue">
-                        {item.extra}
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="font-display font-black text-lg text-parchmentText leading-tight">
+                          {item.nombre}
+                        </h4>
+                      </div>
+                      <div className="text-xs font-fantasy font-bold text-ribbonRed tracking-wide">
+                        {item.subtitulo}
+                      </div>
+                      <p className="text-sm text-parchmentText leading-relaxed">
+                        {item.descripcion}
+                      </p>
+                      <div className="pt-1.5 mt-1.5 border-t border-[#8F7643]/40 text-xs font-fantasy font-bold text-guildBlue flex items-center justify-between">
+                        <span>{item.extra}</span>
+                        {item.imagen && (
+                          <span className="text-[10px] text-ribbonRed underline">Ver arte completo</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -713,31 +1135,30 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          6. JUGABILIDAD, CONTROLES Y SIMULADOR DE COMBATE POR TURNOS
+          6. JUGABILIDAD Y SIMULADOR DE COMBATE DE ÓPALO
           ========================================================= */}
       <section id="combate" className="relative z-10 py-16 px-4 max-w-7xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-12 space-y-2">
           <span className="px-3 py-1 rounded bg-guildBlue/60 border border-goldPrimary/50 text-goldLight font-fantasy text-xs tracking-widest">
             GUÍA DE COMBATE E INSTRUCCIONES
           </span>
-          <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">Mecánicas, Controles y Demo de Combate</h2>
+          <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">Mecánicas y Purificación</h2>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Simulador Interactivo */}
           <div className="lg:col-span-7 p-6 rounded-2xl bg-[#141022] border-2 border-goldPrimary shadow-2xl space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-goldPrimary/30 pb-3">
               <div className="flex items-center gap-2">
                 <Swords className="w-6 h-6 text-goldPrimary" />
-                <h3 className="font-fantasy font-bold text-lg text-goldLight">Simulador de Combate por Turnos</h3>
+                <h3 className="font-fantasy font-bold text-lg text-goldLight">Simulador por Turnos: Ópalo</h3>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`px-3 py-1 rounded-full font-fantasy text-xs font-bold border ${
+                <span className={`px-3 py-1 rounded-full font-fantasy text-xs font-bold border transition-colors ${
                   combat.realm === 'light'
-                    ? 'bg-amber-500/20 border-goldLight text-goldLight'
-                    : 'bg-purple-950 border-purple-400 text-purple-200'
+                    ? 'bg-amber-500/20 border-goldLight text-goldLight shadow-[0_0_10px_rgba(212,165,55,0.4)]'
+                    : 'bg-purple-950 border-purple-400 text-purple-200 shadow-[0_0_10px_rgba(168,85,247,0.4)]'
                 }`}>
-                  Dimensión: {combat.realm === 'light' ? 'Reino de la Luz' : 'Reino del Vacío'}
+                  Magia: {combat.realm === 'light' ? 'Creación Pura' : 'Destrucción Abisal'}
                 </span>
                 <button onClick={resetCombatDemo} className="px-2.5 py-1 rounded bg-guildBlue text-goldLight text-xs font-fantasy hover:bg-guildBlueLight">
                   Reiniciar
@@ -745,20 +1166,29 @@ export default function App() {
               </div>
             </div>
 
-            <div className={`relative rounded-xl p-5 grid grid-cols-2 gap-4 items-center min-h-[210px] border transition-colors duration-500 ${
+            <div className={`relative rounded-xl p-5 grid grid-cols-2 gap-4 items-center min-h-[220px] border transition-all duration-700 ${
               combat.realm === 'light'
-                ? 'bg-gradient-to-b from-[#2F4A8A]/40 to-[#1E1830] border-goldPrimary/50'
-                : 'bg-gradient-to-b from-purple-950/80 to-[#090612] border-purple-500/50'
+                ? 'bg-gradient-to-b from-[#2F4A8A]/40 to-[#1E1830] border-goldPrimary/50 shadow-inner'
+                : 'bg-gradient-to-b from-[#4a0b25]/80 to-[#090612] border-ribbonRed/50 shadow-inner'
             }`}>
-              {/* Kaelen */}
-              <div className="flex flex-col items-center text-center space-y-2">
-                <div className="w-20 h-20 rounded-2xl bg-guildBlue border-2 border-goldLight flex items-center justify-center shadow-lg">
-                  <Sword className="w-10 h-10 text-goldLight" />
+
+              {/* Avatar de Ópalo Animado sin Fondo */}
+              <div className="flex flex-col items-center text-center space-y-2 group">
+                <div className={`relative w-28 h-32 rounded-2xl border-2 flex items-center justify-center overflow-hidden p-1 transition-all duration-500 ${
+                  combat.realm === 'light'
+                  ? 'bg-[radial-gradient(circle,_#2F4A8A_0%,_#120E1E_100%)] border-goldLight shadow-[0_0_25px_rgba(212,165,55,0.5)]'
+                  : 'bg-[radial-gradient(circle,_#581c87_0%,_#090612_100%)] border-purple-500 shadow-[0_0_25px_rgba(168,85,247,0.6)]'
+                }`}>
+                  <SmartChromaSprite
+                    src="/personajes/Opalo.jpg"
+                    alt="Ópalo en combate"
+                    className="w-full h-full object-contain object-top sprite-card-anim"
+                  />
                 </div>
                 <div className="w-full max-w-[180px] space-y-1">
                   <div className="flex justify-between text-xs font-fantasy font-bold">
-                    <span className="text-goldLight">Kaelen (Guerrero)</span>
-                    <span>{combat.heroHp} / {combat.heroMaxHp} HP</span>
+                    <span className="text-goldLight">Ópalo</span>
+                    <span>{combat.heroHp} / {combat.heroMaxHp}</span>
                   </div>
                   <div className="w-full h-2.5 rounded-full bg-slate-900 overflow-hidden border border-goldPrimary/40">
                     <div
@@ -767,21 +1197,21 @@ export default function App() {
                     ></div>
                   </div>
                   <div className="flex justify-between text-[11px] font-fantasy text-sky-300">
-                    <span>Energía Astral</span>
-                    <span>{combat.heroMp} / 60 MP</span>
+                    <span>Energía Primordial</span>
+                    <span>{combat.heroMp} / 80</span>
                   </div>
                 </div>
               </div>
 
-              {/* Devorador Abisal */}
-              <div className="flex flex-col items-center text-center space-y-2">
-                <div className="w-20 h-20 rounded-2xl bg-purple-950 border-2 border-ribbonRed flex items-center justify-center shadow-lg">
-                  <Skull className="w-10 h-10 text-red-400" />
+              {/* Masa Oscura Enemiga */}
+              <div className="flex flex-col items-center text-center space-y-2 group">
+                <div className="w-24 h-24 rounded-2xl bg-[#0a0505] border-2 border-ribbonRed flex items-center justify-center shadow-[0_0_25px_rgba(185,28,28,0.6)] animate-pulse">
+                  <Skull className="w-12 h-12 text-red-500 drop-shadow-[0_0_10px_rgba(255,0,0,0.8)]" />
                 </div>
                 <div className="w-full max-w-[180px] space-y-1">
                   <div className="flex justify-between text-xs font-fantasy font-bold">
-                    <span className="text-red-400">Devorador Abisal</span>
-                    <span>{combat.enemyHp} / {combat.enemyMaxHp} HP</span>
+                    <span className="text-red-400">Masa Oscura</span>
+                    <span>{combat.enemyHp} / {combat.enemyMaxHp}</span>
                   </div>
                   <div className="w-full h-2.5 rounded-full bg-slate-900 overflow-hidden border border-red-500/40">
                     <div
@@ -789,63 +1219,62 @@ export default function App() {
                       style={{ width: `${(combat.enemyHp / combat.enemyMaxHp) * 100}%` }}
                     ></div>
                   </div>
-                  <span className="text-[11px] font-fantasy text-amber-300 block">
-                    {combat.realm === 'light' ? 'Vulnerable a Luz (+25% daño)' : 'Defensa de Sombra activa'}
+                  <span className="text-[10px] font-fantasy text-amber-300 block">
+                    {combat.realm === 'light' ? 'Peligro: Corrosión de Vida' : 'Vulnerable a Destrucción Mágica'}
                   </span>
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-fantasy text-xs">
-              <button onClick={() => executeCombatTurn('attack')} className="p-3 rounded-xl bg-guildBlue hover:bg-guildBlueLight text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow">
+              <button onClick={() => executeCombatTurn('attack')} className="p-3 rounded-xl bg-guildBlue hover:bg-guildBlueLight text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow hover:-translate-y-1">
                 <Sword className="w-4 h-4" />
-                <span>Corte Áureo</span>
+                <span>Corte Físico</span>
               </button>
-              <button onClick={() => executeCombatTurn('skill')} className="p-3 rounded-xl bg-amber-800 hover:bg-amber-700 text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow">
+              <button onClick={() => executeCombatTurn('skill')} className="p-3 rounded-xl bg-amber-800 hover:bg-amber-700 text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow hover:-translate-y-1">
                 <Sparkles className="w-4 h-4" />
-                <span>Juicio Solar (20 MP)</span>
+                <span>Furia del Bucle</span>
               </button>
-              <button onClick={() => executeCombatTurn('shift')} className="p-3 rounded-xl bg-purple-900 hover:bg-purple-800 text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow">
+              <button onClick={() => executeCombatTurn('shift')} className="p-3 rounded-xl bg-purple-900 hover:bg-purple-800 text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow hover:-translate-y-1">
                 <Repeat className="w-4 h-4" />
                 <span>Cambiar Dualidad</span>
               </button>
-              <button onClick={() => executeCombatTurn('heal')} className="p-3 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow">
+              <button onClick={() => executeCombatTurn('heal')} className="p-3 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-goldLight font-bold border border-goldPrimary/50 flex flex-col items-center gap-1 transition shadow hover:-translate-y-1">
                 <FlaskConical className="w-4 h-4" />
-                <span>Elixir (+45 HP)</span>
+                <span>Purificarse</span>
               </button>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-[#0D0A16] border border-goldPrimary/30 text-xs font-serifBody text-parchmentLight h-28 overflow-y-auto space-y-1">
+            <div className="p-3.5 rounded-xl bg-[#0D0A16] border border-goldPrimary/30 text-xs font-serifBody text-parchmentLight h-32 overflow-y-auto space-y-1.5 scroll-smooth">
               {combat.logs.map((log, index) => (
-                <p key={index} className={log.highlight ? 'text-goldLight font-bold' : 'text-slate-300'}>
+                <p key={index} className={`border-b border-white/5 pb-1 ${log.highlight ? 'text-goldLight font-bold' : 'text-slate-300'}`}>
                   {log.text}
                 </p>
               ))}
             </div>
           </div>
 
-          {/* Controles en Pergamino */}
           <div className="lg:col-span-5">
             <PergaminoBox bodyClassName="space-y-4">
               <div className="flex items-center gap-3 border-b-2 border-[#8F7643]/40 pb-2">
                 <Gamepad2 className="w-6 h-6 text-ribbonRed" />
-                <h3 className="font-display text-xl font-bold text-parchmentText">Controles y Forma de Jugar</h3>
+                <h3 className="font-display text-xl font-bold text-parchmentText">Controles y Sobrevivencia</h3>
               </div>
               <p className="text-sm leading-relaxed">
-                <strong>DUALITY</strong> divide su jugabilidad en <strong>Exploración de Plataformas 2D</strong> y <strong>Combate por Turnos</strong>.
+                <strong>DUALITY</strong> exige dominar tanto la exploración como el combate. La <strong>corrosión</strong> no es solo daño, deteriora lentamente tus estadísticas si no te purificas.
               </p>
               <div className="space-y-2.5 text-sm">
-                <div className="p-2.5 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643]">
-                  <span className="font-fantasy font-bold text-guildBlue block text-xs">MOVIMIENTO EN PLATAFORMAS</span>
-                  <strong>Teclas A / D</strong> o <strong>Flechas</strong> para desplazarse por ruinas y abismos.
+                <div className="p-2.5 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643] hover:bg-[#3B2A1A]/20 transition-colors">
+                  <span className="font-fantasy font-bold text-guildBlue block text-xs">MOVIMIENTO BÁSICO</span>
+                  <strong>Teclas A / D</strong> o <strong>Flechas</strong> para desplazarse por el bosque y las ruinas.
                 </div>
-                <div className="p-2.5 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643]">
-                  <span className="font-fantasy font-bold text-guildBlue block text-xs">SALTO Y DOBLE SALTO RÚNICO</span>
-                  <strong>Barra Espaciadora</strong> o <strong>Botón A</strong>. Permite alcanzar cornisas ocultas.
+                <div className="p-2.5 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643] hover:bg-[#3B2A1A]/20 transition-colors">
+                  <span className="font-fantasy font-bold text-guildBlue block text-xs">EVASIÓN Y SALTO RÚNICO</span>
+                  <strong>Barra Espaciadora</strong> o <strong>Botón A</strong>. Esencial para esquivar ataques de las bestias.
                 </div>
-                <div className="p-2.5 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643]">
-                  <span className="font-fantasy font-bold text-guildBlue block text-xs">CAMBIO DE REALIDAD (DUALIDAD)</span>
-                  <strong>Tecla Q</strong> o <strong>Gatillo L1/LB</strong>. Alterna entre el Reino de la Luz y el Vacío.
+                <div className="p-2.5 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643] hover:bg-[#3B2A1A]/20 transition-colors">
+                  <span className="font-fantasy font-bold text-ribbonRed block text-xs">USO DE LA DUALIDAD</span>
+                  <strong>Tecla Q</strong> o <strong>Gatillo L1/LB</strong>. Alterna entre energía de creación y destrucción para resolver puzzles y exponer a los enemigos.
                 </div>
               </div>
             </PergaminoBox>
@@ -854,76 +1283,132 @@ export default function App() {
       </section>
 
       {/* =========================================================
-          7. MAPA INTERACTIVO DE AETHELGARD
+          7. MAPA INTERACTIVO OFICIAL DE DUALITY
           ========================================================= */}
       <section id="mapa" className="relative z-10 py-16 px-4 bg-[#141022]/90 border-y-2 border-goldPrimary/40">
         <div className="max-w-7xl mx-auto space-y-10">
           <div className="text-center max-w-3xl mx-auto space-y-2">
             <span className="px-3 py-1 rounded bg-guildBlue/60 border border-goldPrimary/50 text-goldLight font-fantasy text-xs tracking-widest">
-              CARTOGRAFÍA Y MULTIMEDIA
+              CARTOGRAFÍA OFICIAL DEL MUNDO
             </span>
-            <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">Mapa de Aethelgard</h2>
+            <h2 className="font-display text-3xl sm:text-5xl font-bold text-goldLight">
+              Continente y Reinos de DUALITY
+            </h2>
+            <p className="text-slate-300 text-sm sm:text-base">
+              Selecciona cualquiera de los <strong>10 bastiones y regiones</strong> directamente sobre el mapa o en el pergamino para consultar su lore, rango de peligro y jefe de zona.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            <div className="lg:col-span-7 p-3 rounded-2xl bg-[#1E1830] border-4 border-goldPrimary shadow-2xl">
-              <svg viewBox="0 0 650 440" className="w-full h-auto rounded-xl">
-                <rect width="650" height="440" fill="#2A4B5C" />
-                <path d="M30 25 Q180 15 310 45 L260 155 Q120 165 40 120 Z" fill="#D8E6EC" stroke="#3B2A1A" strokeWidth="3" />
-                <path d="M310 45 Q490 35 590 110 L560 220 Q420 205 260 155 Z" fill="#8B4A32" stroke="#3B2A1A" strokeWidth="3" />
-                <path d="M120 155 Q310 140 520 210 L490 350 Q290 365 160 275 Z" fill="#5A8F46" stroke="#3B2A1A" strokeWidth="3" />
-                <path d="M60 280 Q190 250 310 340 L250 415 Q110 410 55 350 Z" fill="#D99B38" stroke="#3B2A1A" strokeWidth="3" />
-                
-                {[
-                  { idx: 0, cx: 320, cy: 245 },
-                  { idx: 1, cx: 155, cy: 90 },
-                  { idx: 2, cx: 465, cy: 125 },
-                  { idx: 3, cx: 180, cy: 350 }
-                ].map((m) => (
-                  <g key={m.idx} onClick={() => setSelectedRegionIdx(m.idx)} className="cursor-pointer">
-                    <circle
-                      cx={m.cx}
-                      cy={m.cy}
-                      r="18"
-                      fill={selectedRegionIdx === m.idx ? '#2F4A8A' : '#B91C1C'}
-                      stroke="#F0CF6E"
-                      strokeWidth="3"
-                    />
-                    <text x={m.cx} y={m.cy + 5} textAnchor="middle" fill="#FFF" fontFamily="Cinzel" fontSize="13" fontWeight="bold">
-                      {m.idx + 1}
-                    </text>
-                  </g>
-                ))}
-              </svg>
+
+            <div className="lg:col-span-7 p-2 sm:p-3 rounded-2xl bg-[#1E1830] border-4 border-goldPrimary shadow-[0_0_35px_rgba(0,0,0,0.85)] relative group">
+              <div className="relative w-full overflow-hidden rounded-xl border-2 border-[#3B2A1A]">
+                <img
+                  src="/MapaDuality.webp"
+                  alt="Mapa Oficial del Mundo de Duality"
+                  className="w-full h-auto block select-none"
+                />
+
+                {MAP_REGIONS.map((region, idx) => {
+                  const isSelected = selectedRegionIdx === idx;
+                  return (
+                    <button
+                      key={region.id}
+                      onClick={() => setSelectedRegionIdx(idx)}
+                      style={{ left: `${region.x}%`, top: `${region.y}%` }}
+                      title={region.name}
+                      className="absolute -translate-x-1/2 -translate-y-1/2 z-20 group/pin focus:outline-none"
+                    >
+                      {isSelected && (
+                        <span className="absolute -inset-3 rounded-full bg-goldLight/80 animate-ping shadow-[0_0_20px_rgba(212,165,55,1)]"></span>
+                      )}
+
+                      <div
+                        className={`relative w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center font-fantasy font-extrabold text-xs transition-all duration-300 shadow-xl ${
+                          isSelected
+                            ? 'bg-guildBlue text-goldLight border-2 border-goldLight scale-125 ring-4 ring-goldPrimary/50'
+                            : 'bg-ribbonRed/95 text-white border-2 border-goldPrimary hover:scale-125 hover:bg-guildBlue hover:shadow-[0_0_15px_rgba(212,165,55,0.8)]'
+                        }`}
+                      >
+                        {idx + 1}
+                      </div>
+
+                      <span
+                        className={`hidden sm:block absolute left-1/2 -translate-x-1/2 -bottom-7 px-2.5 py-1 rounded bg-[#120E1E]/95 border border-goldPrimary text-[10px] font-fantasy font-bold whitespace-nowrap pointer-events-none transition-all duration-300 shadow-md ${
+                          isSelected
+                            ? 'opacity-100 text-goldLight -translate-y-1'
+                            : 'opacity-0 group-hover/pin:opacity-100 text-slate-200'
+                        }`}
+                      >
+                        {region.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-2 px-2 flex flex-wrap items-center justify-between text-[11px] font-fantasy text-slate-300 gap-2">
+                <span>🧭 Haz clic sobre cualquier número del mapa para inspeccionar el reino</span>
+                <span className="text-goldLight font-bold">
+                  Región Activa: {currentRegion.name} ({selectedRegionIdx + 1}/10)
+                </span>
+              </div>
             </div>
 
             <div className="lg:col-span-5">
-              <PergaminoBox bodyClassName="space-y-3">
-                <span className="px-2.5 py-0.5 rounded bg-guildBlue text-goldLight font-fantasy text-xs font-bold">
-                  {currentRegion.badge}
-                </span>
-                <h3 className="font-display text-2xl font-bold text-parchmentText">{currentRegion.title}</h3>
-                <p className="text-sm leading-relaxed">{currentRegion.desc}</p>
-                <div className="p-3 rounded-lg bg-[#3B2A1A]/10 border border-[#8F7643] text-xs space-y-1">
-                  <div><strong>Nivel Recomendado:</strong> {currentRegion.level}</div>
-                  <div><strong>Peligros de Plataformas:</strong> {currentRegion.hazards}</div>
-                  <div><strong>Jefe de Región:</strong> <em>{currentRegion.boss}</em>.</div>
+              <PergaminoBox bodyClassName="space-y-3.5">
+                <div className="flex items-center justify-between gap-2 border-b border-[#8F7643]/40 pb-2">
+                  <span className="px-2.5 py-0.5 rounded bg-guildBlue text-goldLight font-fantasy text-[11px] font-bold shadow-sm">
+                    {currentRegion.badge}
+                  </span>
+                  <span className="font-fantasy font-extrabold text-xs text-ribbonRed">
+                    Reino #{selectedRegionIdx + 1}
+                  </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                  {MAP_REGIONS.map((r, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setSelectedRegionIdx(i)}
-                      className={`p-2 rounded font-fantasy text-xs font-bold ${
-                        selectedRegionIdx === i ? 'bg-guildBlue text-goldLight' : 'bg-[#3B2A1A]/15 text-parchmentText'
-                      }`}
-                    >
-                      Bioma #{i + 1}
-                    </button>
-                  ))}
+
+                <h3 className="font-display text-2xl font-black text-parchmentText leading-tight">
+                  {currentRegion.title}
+                </h3>
+
+                <p className="text-sm leading-relaxed text-parchmentText">
+                  {currentRegion.desc}
+                </p>
+
+                <div className="p-3 rounded-xl bg-[#3B2A1A]/10 border-2 border-[#8F7643]/60 text-xs space-y-1.5 shadow-inner">
+                  <div>
+                    <strong className="font-fantasy text-guildBlue">Nivel Recomendado:</strong> {currentRegion.level}
+                  </div>
+                  <div>
+                    <strong className="font-fantasy text-guildBlue">Peligros de Zona:</strong> {currentRegion.hazards}
+                  </div>
+                  <div>
+                    <strong className="font-fantasy text-ribbonRed">Jefe de Región:</strong> <em>{currentRegion.boss}</em>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-[#8F7643]/40">
+                  <span className="block font-fantasy font-bold text-[11px] text-parchmentText/80 mb-2 uppercase tracking-wider">
+                    Viaje Rápido por los 10 Reinos:
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {MAP_REGIONS.map((r, i) => (
+                      <button
+                        key={r.id}
+                        onClick={() => setSelectedRegionIdx(i)}
+                        className={`px-2.5 py-1.5 rounded-lg font-fantasy text-[11px] font-bold text-left truncate transition-all ${
+                          selectedRegionIdx === i
+                            ? 'bg-guildBlue text-goldLight border border-goldPrimary shadow-md'
+                            : 'bg-[#3B2A1A]/10 hover:bg-[#3B2A1A]/20 hover:text-goldPrimary text-parchmentText border border-[#8F7643]/40'
+                        }`}
+                      >
+                        {i + 1}. {r.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </PergaminoBox>
             </div>
+
           </div>
         </div>
       </section>
@@ -977,7 +1462,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {STUDIO_TEAM.map((member, i) => (
-              <div key={i} className="p-5 rounded-2xl bg-[#1E1830] border-2 border-goldPrimary/50 shadow-xl space-y-2">
+              <div key={i} className="p-5 rounded-2xl bg-[#1E1830] border-2 border-goldPrimary/50 shadow-xl space-y-2 hover:-translate-y-1 transition-transform">
                 <span className="px-2.5 py-0.5 rounded bg-guildBlue text-goldLight font-fantasy text-[11px] font-bold">
                   {member.rol}
                 </span>
@@ -989,26 +1474,87 @@ export default function App() {
         </div>
       </section>
 
+      {/* =========================================================
+          MODAL DE INSPECCIÓN DE PERSONAJE A CUERPO COMPLETO
+          ========================================================= */}
+      {inspectedItem && (
+        <div
+          onClick={() => setInspectedItem(null)}
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-lg w-full rounded-3xl bg-[radial-gradient(circle_at_top,_#2F4A8A_0%,_#151024_60%,_#090612_100%)] border-2 border-goldPrimary p-6 relative shadow-[0_0_50px_rgba(212,165,55,0.45)] text-center space-y-4"
+          >
+            <button
+              onClick={() => setInspectedItem(null)}
+              className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-goldLight border border-goldPrimary hover:bg-ribbonRed hover:text-white transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="h-80 flex items-center justify-center relative">
+              <div className="absolute w-64 h-64 rounded-full border-2 border-dashed border-goldLight/40 rune-orbit-reverse pointer-events-none"></div>
+              <SmartChromaSprite
+                src={inspectedItem.imagen}
+                alt={inspectedItem.nombre}
+                className="h-full w-auto object-contain sprite-hero-anim relative z-10"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="px-3 py-1 rounded-full bg-guildBlue border border-goldPrimary text-goldLight font-fantasy text-xs font-bold">
+                {inspectedItem.subtitulo}
+              </span>
+              <h3 className="font-display text-3xl font-black text-goldLight">
+                {inspectedItem.nombre}
+              </h3>
+              <p className="text-sm text-parchmentLight/90 leading-relaxed">
+                {inspectedItem.descripcion}
+              </p>
+              <div className="text-xs font-fantasy font-bold text-goldPrimary pt-2">
+                {inspectedItem.extra}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL DE AUTENTICACIÓN (LOGIN / REGISTRO) */}
       <AuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
         onLoginSuccess={(loggedUser) => {
           setUser(loggedUser);
+          setCurrentAvatar(loggedUser.avatar || '/avatarares/turnos_slime_verde.webp');
           showToast(`¡Bienvenido al Gremio, ${loggedUser.username}!`);
+        }}
+      />
+
+      {/* MODAL DE EDICIÓN DE PERFIL / AVATAR */}
+      <EditProfileModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        user={user}
+        onUpdateAvatar={(nuevoAvatar) => {
+          setCurrentAvatar(nuevoAvatar);
+          const updatedUser = { ...user, avatar: nuevoAvatar };
+          setUser(updatedUser);
+          localStorage.setItem('duality_user', JSON.stringify(updatedUser));
+          showToast('¡Insignia actualizada con éxito!');
         }}
       />
 
       {/* MODAL DE INSTALACIÓN PWA */}
       {pwaInstallOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-md w-full rounded-2xl bg-[#1E1830] border-2 border-goldPrimary p-6 text-center space-y-4">
+          <div className="max-w-md w-full rounded-2xl bg-[#1E1830] border-2 border-goldPrimary p-6 text-center space-y-4 shadow-[0_0_40px_rgba(212,165,55,0.3)]">
             <h3 className="font-display text-2xl font-bold text-goldLight">Instalar DUALITY App</h3>
             <p className="text-sm text-slate-300">
               Ejecuta DUALITY en ventana independiente (<code>standalone</code>) con soporte sin conexión.
             </p>
             <div className="flex gap-3">
-              <button onClick={() => setPwaInstallOpen(false)} className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-fantasy text-xs font-bold">
+              <button onClick={() => setPwaInstallOpen(false)} className="flex-1 py-2.5 rounded-xl bg-[#120E1E] text-slate-300 font-fantasy text-xs font-bold border border-[#8F7643] hover:bg-ribbonRed hover:text-white transition-colors">
                 Cerrar
               </button>
               <button
@@ -1016,7 +1562,7 @@ export default function App() {
                   setPwaInstallOpen(false);
                   showToast('¡DUALITY PWA lista en tu dispositivo!');
                 }}
-                className="flex-1 py-2.5 rounded-xl bg-goldPrimary text-dualityDeep font-fantasy text-xs font-extrabold"
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-goldPrimary to-goldLight text-dualityDeep font-fantasy text-xs font-extrabold shadow-lg hover:brightness-110"
               >
                 Instalar Ahora
               </button>
@@ -1027,7 +1573,7 @@ export default function App() {
 
       {/* TOAST DE NOTIFICACIÓN */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 px-5 py-3 rounded-xl bg-[#120E1E] border-2 border-goldPrimary text-goldLight font-fantasy text-xs font-bold shadow-2xl flex items-center gap-2">
+        <div className="fixed bottom-5 right-5 z-50 px-5 py-3 rounded-xl bg-[#120E1E] border-2 border-goldPrimary text-goldLight font-fantasy text-xs font-bold shadow-[0_0_20px_rgba(212,165,55,0.5)] flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-goldPrimary" />
           <span>{toastMessage}</span>
         </div>
