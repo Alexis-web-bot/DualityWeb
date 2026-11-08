@@ -1,12 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { db, auth } from '../firebaseConfig'; // <-- Importamos auth directo
 
 export default function EditProfileModal({ isOpen, onClose, user, onUpdateAvatar }) {
-  const [selectedAvatar, setSelectedAvatar] = useState(user?.avatar || '');
+  const [selectedAvatar, setSelectedAvatar] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Tus avatares oficiales de DUALITY
+  // Sincroniza el avatar actual cada vez que se abre el modal
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedAvatar(user?.avatar || '/avatarares/turnos_slime_verde.webp');
+    }
+  }, [isOpen, user?.avatar]);
+
   const avataresDisponibles = [
     { id: 'arbol', src: '/avatarares/turnos_arbol.webp', nombre: 'Guerrero Árbol' },
     { id: 'bandida', src: '/avatarares/turnos_bandida.webp', nombre: 'Bandida Silvestre' },
@@ -18,12 +24,19 @@ export default function EditProfileModal({ isOpen, onClose, user, onUpdateAvatar
   ];
 
   const handleGuardarCambios = async () => {
-    if (!user?.uid) return;
+    // Tomamos el UID directo de Firebase por si el estado de React llega incompleto
+    const uidSeguro = user?.uid || auth.currentUser?.uid;
+    
+    if (!uidSeguro) {
+      console.error("No se encontró el UID del usuario.");
+      alert("Tu sesión está inestable. Por favor, cierra sesión y vuelve a entrar.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const userRef = doc(db, 'usuarios', user.uid);
+      const userRef = doc(db, 'usuarios', uidSeguro);
       
-      // Usamos setDoc con merge: true para evitar errores si el documento es nuevo
       await setDoc(userRef, {
         avatar: selectedAvatar,
       }, { merge: true });
@@ -31,7 +44,7 @@ export default function EditProfileModal({ isOpen, onClose, user, onUpdateAvatar
       onUpdateAvatar(selectedAvatar);
       onClose();
     } catch (error) {
-      console.error("Error al actualizar el avatar:", error);
+      console.error("Error al actualizar el avatar en Firebase:", error);
     } finally {
       setLoading(false);
     }

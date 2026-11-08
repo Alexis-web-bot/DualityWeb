@@ -1,17 +1,21 @@
 {
-  "name": "DUALITY - Videojuego Oficial, Tienda y Grimorio Wiki",
+  "name": "DUALITY",
   "short_name": "DUALITY",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1E1830",
+  "background_color": "#120E1E",
   "theme_color": "#D4A537",
-  "orientation": "portrait-primary",
+  "description": "Videojuego Oficial, Tienda y Grimorio Wiki",
   "icons": [
     {
-      "src": "/favicon.svg",
-      "sizes": "192x192 512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "src": "/ouroboros-dorado.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/ouroboros-dorado.png",
+      "sizes": "512x512",
+      "type": "image/png"
     }
   ]
 }
